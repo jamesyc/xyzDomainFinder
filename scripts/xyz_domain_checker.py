@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Check availability of numeric .xyz domains.
 
-The script queries the CentralNic RDAP service to determine whether 6 or
-7 digit numeric .xyz domains are available. Results are written to a CSV
-file so the process can be resumed and the output is append-only.
+The script queries either the CentralNic RDAP service or a DNS-over-HTTPS
+resolver to determine whether 6 or 7 digit numeric .xyz domains are
+available. Results are written to a CSV file so the process can be resumed
+and the output is append-only.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ except ImportError:  # pragma: no cover - compatibility fallback
     TCPConnector = None  # type: ignore[assignment]
 
 RDAP_URL_TEMPLATE = "https://rdap.centralnic.com/xyz/domain/{domain}"
+DEFAULT_DOH_ENDPOINT = "https://cloudflare-dns.com/dns-query"
 DEFAULT_RESUME_FILE = "resume_state.json"
 DEFAULT_OUTPUT_FILE = "available_domains.csv"
 
@@ -115,10 +117,10 @@ class ResumeState:
 THROTTLE_NOTICE_SHOWN = False
 
 
-async def query_domain(session: aiohttp.ClientSession, domain: str, *,
-                       max_retries: int, timeout: float, backoff: float,
-                       rate_limiter: "RateLimiter") -> bool:
-    """Return True if the domain is available, False if registered."""
+async def _query_domain_rdap(session: aiohttp.ClientSession, domain: str, *,
+                             max_retries: int, timeout: float, backoff: float,
+                             rate_limiter: "RateLimiter") -> bool:
+    """Return True if the domain is available via RDAP, False if registered."""
 
     url = RDAP_URL_TEMPLATE.format(domain=domain)
     last_error: Optional[str] = None
@@ -142,7 +144,7 @@ async def query_domain(session: aiohttp.ClientSession, domain: str, *,
                     return not bool(statuses)
                 if response.status == 404:
                     return True
-                if response.status in {403, 429, 503}:
+                if response.status in {403, 429, 500, 502, 503, 504}:
                     retry_after = _parse_retry_after(response.headers)
                     last_error = f"HTTP {response.status}"
                     global THROTTLE_NOTICE_SHOWN
@@ -181,10 +183,104 @@ async def query_domain(session: aiohttp.ClientSession, domain: str, *,
     )
 
 
+async def _query_domain_doh(session: aiohttp.ClientSession, domain: str, *,
+                            max_retries: int, timeout: float, backoff: float,
+                            rate_limiter: "RateLimiter", doh_endpoint: str) -> bool:
+    """Return True if the domain is available via DNS-over-HTTPS."""
+
+    params = {"name": domain, "type": "NS"}
+    headers = {"Accept": "application/dns-json"}
+    last_error: Optional[str] = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            await rate_limiter.acquire()
+            async with session.get(doh_endpoint, params=params, headers=headers,
+                                   timeout=timeout) as response:
+                text = await response.text()
+                if response.status == 200:
+                    try:
+                        payload = json.loads(text)
+                    except json.JSONDecodeError as exc:
+                        raise RuntimeError(
+                            f"Invalid DNS response for {domain}: {exc}\n{text[:200]}"
+                        )
+                    status = payload.get("Status")
+                    if status == 3:  # NXDOMAIN
+                        return True
+                    if status == 0:
+                        # Registered domains should advertise name servers. When
+                        # no answers are returned treat the domain as
+                        # unavailable to avoid false positives.
+                        return False
+                    if status in {2, 5}:  # SERVFAIL or REFUSED
+                        last_error = f"DNS status {status}"
+                        delay = backoff * attempt
+                        await asyncio.sleep(delay)
+                        continue
+                    last_error = f"Unexpected DNS status {status}"
+                    raise RuntimeError(
+                        f"Unexpected DNS status {status} for {domain}: {text[:200]}"
+                    )
+                if response.status in {403, 429, 503}:
+                    retry_after = _parse_retry_after(response.headers)
+                    last_error = f"HTTP {response.status}"
+                    if retry_after is not None and retry_after > 0:
+                        await rate_limiter.postpone(retry_after)
+                        await asyncio.sleep(retry_after)
+                    else:
+                        delay = backoff * attempt
+                        await rate_limiter.postpone(delay)
+                        await asyncio.sleep(delay)
+                    continue
+                raise RuntimeError(
+                    f"Unexpected HTTP status {response.status} for {domain}: {text[:200]}"
+                )
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            last_error = f"{exc.__class__.__name__}: {exc}"
+            if attempt == max_retries:
+                raise
+            await asyncio.sleep(backoff * attempt)
+    if last_error and last_error.startswith("DNS status"):
+        return False
+    if last_error and last_error.startswith("HTTP "):
+        return False
+    raise RuntimeError(
+        f"Failed to determine availability for {domain} after {max_retries} attempts"
+        + (f" ({last_error})" if last_error else "")
+    )
+
+
+async def query_domain(session: aiohttp.ClientSession, domain: str, *,
+                       max_retries: int, timeout: float, backoff: float,
+                       rate_limiter: "RateLimiter", lookup_mode: str,
+                       doh_endpoint: str) -> bool:
+    if lookup_mode == "rdap":
+        return await _query_domain_rdap(
+            session,
+            domain,
+            max_retries=max_retries,
+            timeout=timeout,
+            backoff=backoff,
+            rate_limiter=rate_limiter,
+        )
+    if lookup_mode == "doh":
+        return await _query_domain_doh(
+            session,
+            domain,
+            max_retries=max_retries,
+            timeout=timeout,
+            backoff=backoff,
+            rate_limiter=rate_limiter,
+            doh_endpoint=doh_endpoint,
+        )
+    raise ValueError(f"Unknown lookup mode: {lookup_mode}")
+
+
 async def process_batch(session: aiohttp.ClientSession, numbers: List[int], *,
                         length: int, semaphore: asyncio.Semaphore,
                         max_retries: int, timeout: float, backoff: float,
-                        rate_limiter: "RateLimiter") -> List[str]:
+                        rate_limiter: "RateLimiter", lookup_mode: str,
+                        doh_endpoint: str) -> List[str]:
     async def worker(number: int) -> Optional[str]:
         domain = f"{number:0{length}d}.xyz"
         async with semaphore:
@@ -195,6 +291,8 @@ async def process_batch(session: aiohttp.ClientSession, numbers: List[int], *,
                 timeout=timeout,
                 backoff=backoff,
                 rate_limiter=rate_limiter,
+                lookup_mode=lookup_mode,
+                doh_endpoint=doh_endpoint,
             )
         return domain if is_available else None
 
@@ -214,7 +312,8 @@ async def process_batch(session: aiohttp.ClientSession, numbers: List[int], *,
 async def scan_domains(*, lengths: List[int], batch_size: int, concurrency: int,
                        resume: ResumeState, output_path: Path, max_count: Optional[int],
                        max_retries: int, timeout: float, backoff: float,
-                       save_every: int, rate_limit: Optional[float]) -> None:
+                       save_every: int, rate_limit: Optional[float],
+                       lookup_mode: str, doh_endpoint: str) -> None:
     semaphore = asyncio.Semaphore(concurrency)
     checked = 0
     save_counter = 0
@@ -255,6 +354,8 @@ async def scan_domains(*, lengths: List[int], batch_size: int, concurrency: int,
                         timeout=timeout,
                         backoff=backoff,
                         rate_limiter=rate_limiter,
+                        lookup_mode=lookup_mode,
+                        doh_endpoint=doh_endpoint,
                     )
                     for domain in available:
                         writer.writerow([domain, length])
@@ -346,6 +447,17 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         help="Maximum RDAP requests per second (default: unlimited).",
     )
     parser.add_argument(
+        "--lookup-mode",
+        choices=["rdap", "doh"],
+        default="rdap",
+        help="Lookup backend to determine availability (default: rdap).",
+    )
+    parser.add_argument(
+        "--doh-endpoint",
+        default=DEFAULT_DOH_ENDPOINT,
+        help="DNS-over-HTTPS endpoint to query when --lookup-mode=doh.",
+    )
+    parser.add_argument(
         "--save-every",
         type=int,
         default=200,
@@ -395,6 +507,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 backoff=args.backoff,
                 save_every=args.save_every,
                 rate_limit=args.rate_limit,
+                lookup_mode=args.lookup_mode,
+                doh_endpoint=args.doh_endpoint,
             )
         )
     except KeyboardInterrupt:
