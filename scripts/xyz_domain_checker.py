@@ -142,7 +142,7 @@ async def query_domain(session: aiohttp.ClientSession, domain: str, *,
                     return not bool(statuses)
                 if response.status == 404:
                     return True
-                if response.status in {403, 429, 503}:
+                if response.status in {403, 429, 500, 502, 503, 504}:
                     retry_after = _parse_retry_after(response.headers)
                     last_error = f"HTTP {response.status}"
                     global THROTTLE_NOTICE_SHOWN
