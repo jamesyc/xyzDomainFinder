@@ -12,7 +12,8 @@ experiments and campaigns.
 ## Finding available numeric .xyz domains
 
 Use the asynchronous scanner in `scripts/xyz_domain_checker.py` to test each
-6- or 7-digit numeric combination via the CentralNic RDAP service. Results
+6- or 7-digit numeric combination via the CentralNic RDAP service (or an
+optional DNS-over-HTTPS mode). Results
 are appended to `available_domains.csv`, and progress is persisted in
 `resume_state.json` so a scan can be restarted without losing work. The
 current dataset focuses on 6-digit names (`000000.xyz` through `999999.xyz`).
@@ -49,6 +50,11 @@ current dataset focuses on 6-digit names (`000000.xyz` through `999999.xyz`).
   written.
 - `--rate-limit` – cap requests per second to avoid RDAP throttling (helpful
   when running unattended).
+- `--lookup-mode {rdap,doh}` – choose between RDAP (default) and the
+  Cloudflare DNS-over-HTTPS resolver for availability checks. The DoH mode is
+  useful for quicker local experiments when RDAP throttling is too strict.
+- `--doh-endpoint URL` – override the DNS-over-HTTPS endpoint used when in DoH
+  mode (defaults to Cloudflare; compatible with providers like dns.google).
 
 Every run appends available domains to the CSV in the format:
 
