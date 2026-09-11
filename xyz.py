@@ -9,6 +9,7 @@ import sqlite3
 import sys
 import time
 from datetime import date
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import candidates
@@ -39,6 +40,39 @@ def numeric_label(value):
     if not 6 <= len(label) <= 9 or any(c not in '0123456789' for c in label):
         raise ValueError(f'Invalid name {value!r}: expected 6–9 ASCII digits')
     return label
+
+
+def price_limit(value):
+    try:
+        amount = Decimal(value)
+        if amount.is_finite() and amount >= 0:
+            return amount
+    except InvalidOperation:
+        pass
+    raise argparse.ArgumentTypeError('must be a finite nonnegative amount')
+
+
+def check_inputs(args):
+    names = [numeric_label(value) + '.xyz' for value in args.number]
+    if args.input:
+        with args.input.open(encoding='utf-8-sig', newline='') as source:
+            first = source.readline()
+            source.seek(0)
+            if next(csv.reader([first]), [''])[0] == 'domain':
+                reader = csv.DictReader(source)
+                for item in reader:
+                    try:
+                        names.append(numeric_label(item.get('domain') or '') + '.xyz')
+                    except ValueError as error:
+                        raise ValueError(f'{args.input}:{reader.line_num}: {error}') from error
+            else:
+                for line_number, line in enumerate(source, 1):
+                    if line.strip():
+                        try:
+                            names.append(numeric_label(line) + '.xyz')
+                        except ValueError as error:
+                            raise ValueError(f'{args.input}:{line_number}: {error}') from error
+    return list(dict.fromkeys(names)) if args.number or args.input else None
 
 
 def filter_options(command):
@@ -76,6 +110,24 @@ def build_parser():
     find.add_argument('--state',choices=('unchecked','available','unavailable','unknown'))
     find.add_argument('--limit',type=positive_int,default=50)
     find.add_argument('--format',choices=('text','csv'),default='csv')
+    check=commands.add_parser('check',allow_abbrev=False,help='Check a selected catalog shortlist through Namecheap')
+    filter_options(check)
+    check.add_argument('--database',type=Path,default=Path('domains.sqlite3'))
+    check.add_argument('--number',action='append',default=[],help='explicit catalog name; may be repeated')
+    check.add_argument('--input',type=Path,help='plaintext or CSV shortlist of names already in the catalog')
+    check.add_argument('--state',choices=('unchecked','available','unavailable','unknown'))
+    check.add_argument('--limit',type=positive_int,default=200,help='maximum candidates selected (default: 200)')
+    check.add_argument('--max-checks',type=positive_int,default=50,help='maximum distinct live names (default: 50)')
+    check.add_argument('--max-requests',type=positive_int,default=20,help='HTTP attempts including retries (default: 20)')
+    check.add_argument('--timeout',type=positive_int,default=60,help='whole-run deadline in seconds')
+    check.add_argument('--target',type=positive_int,default=10,help='stop after this many eligible available names')
+    check.add_argument('--cache-minutes',type=nonnegative_int,default=15)
+    check.add_argument('--refresh',action='store_true',help='force fresh observations instead of cache reuse')
+    check.add_argument('--preview',action='store_true',help='show the selected names without writes, credentials, or requests')
+    check.add_argument('--exclude-premium',action='store_true',help='exclude premium or unknown price classes from the available target')
+    check.add_argument('--max-registration',type=price_limit,help='one-year base-price ceiling, excluding fees/taxes')
+    check.add_argument('--max-renewal',type=price_limit,help='one-year base-price ceiling, excluding fees/taxes')
+    check.add_argument('--currency',help='three-letter currency required when using price ceilings')
     serve=commands.add_parser('serve',allow_abbrev=False,help='Open the read-only local website')
     serve.add_argument('--database',type=Path,default=Path('domains.sqlite3'))
     serve.add_argument('--port',type=positive_int,default=8765)
@@ -129,6 +181,24 @@ def collect(args):
 def main(argv=None):
     parser=build_parser();args=parser.parse_args(argv)
     try:
+        if args.command == 'check':
+            import catalog
+            import namecheap
+            domains = check_inputs(args)
+            if args.currency:
+                args.currency = args.currency.upper()
+                if len(args.currency) != 3 or not args.currency.isascii() or not args.currency.isalpha():
+                    raise ValueError('--currency must be a three-letter code')
+            if (args.max_registration is not None or args.max_renewal is not None) and not args.currency:
+                raise ValueError('Price ceilings require --currency')
+            if args.preview:
+                selected = catalog.check_selection(args.database,vars(args),args.limit,domains)
+                writer = csv.DictWriter(sys.stdout,fieldnames=(*catalog.COLUMNS,'fresh_cache'),extrasaction='ignore')
+                writer.writeheader()
+                writer.writerows({**row,'fresh_cache':not args.refresh and namecheap.fresh(row,args.cache_minutes)} for row in selected)
+                print(f'Preview: {len(selected)} selected; live-name budget {args.max_checks}; no requests or writes.',file=sys.stderr)
+                return 0
+            return namecheap.run(args.database,args,domains)
         if args.command == 'score':
             labels=[numeric_label(value) for value in args.names]
             print(json.dumps([scoring.score(label,True) for label in labels],indent=2,ensure_ascii=False))

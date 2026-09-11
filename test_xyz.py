@@ -137,7 +137,7 @@ class CatalogTests(unittest.TestCase):
         before=self.path.read_bytes()
         with self.assertRaises(sqlite3.IntegrityError): catalog.build(self.path,rows+[rows[0]],{},stats,True)
         self.assertEqual(before,self.path.read_bytes())
-        self.assertFalse(list(self.path.parent.glob('.catalog-*')))
+        self.assertFalse(list(self.path.parent.glob('.catalog-*.sqlite3')))
         catalog.build(self.path,[rows[0]],{}, {'6':stats['6']},True)
         self.assertEqual(catalog.detail(self.path,'888888.xyz')['registration_price'],'0.99')
 

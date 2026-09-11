@@ -10,7 +10,8 @@ selected patterns, or an explicit candidate-work budget can produce fewer rows.
 Every stored row includes integer score, rank within its length, and explainable
 properties. The website offers length cohorts, minimum-score/property filters,
 and a complete point breakdown. Collection and browsing remain offline;
-Namecheap verification is deferred until the user chooses what to check.
+Namecheap verification is now an explicit, bounded `check` command on a selected
+catalog subset.
 
 The user's latest clarification supersedes the exactness proof and exhaustive
 six-digit oracle proposed below in earlier revisions. We prioritize a broad,
@@ -255,7 +256,7 @@ code, tests, and documentation; persist only winning domains as database rows.
 
 ## CLI changes
 
-Proposed interface, to be implemented after this plan:
+Implemented scoring and browsing interface:
 
 ```sh
 # New defaults: all four lengths, 10,000 winners per length.
@@ -329,8 +330,52 @@ cloud deployment, database service, or new website backend is needed.
    a scoring-version change and rebuild. Preserve visible reasons rather than
    adding undisclosed ranking adjustments.
 
-Namecheap remains deferred throughout these steps. Better catalog coverage is
-not authorization to check all 40,000 names online.
+Better catalog coverage is not authorization to check all 40,000 names online.
+The explicit checking stage below operates on selected names and fixed budgets.
+
+## Selective Namecheap checks
+
+Implemented `check` with the catalog's length, property, score, digit, and state
+filters, plus explicit names and plaintext/CSV input. `--preview` lists the
+selection without credentials, requests, or writes. Unknown names are rejected
+before any request. The website remains a read-only viewer of saved observations.
+
+Default bounds: 200 selected candidates, 50 distinct live names, 20 HTTP attempts,
+60 seconds, and a target of 10 eligible available results. Batches are at most
+50 names and limited by remaining budgets/target. A single Namecheap client uses
+serial pacing, a maximum of two retries, and Retry-After-aware waits. A deadline
+also bounds network operations. Authentication/configuration failures stop.
+
+Reuse successful Namecheap observations for 15 minutes unless refreshed explicitly.
+Unknown, stale, future-dated, or other-provider results cannot count as fresh
+cache hits. Save each response batch transactionally, including partial failures;
+retry only unresolved entries. A failed refresh becomes unknown rather than
+making an old success appear newly verified.
+
+Observation schema v3 adds nullable premium status, term, reported fees, quote
+notes, and error codes. Old catalogs remain readable through null projections;
+checking migrates observation columns in place. Rebuilds preserve every retained
+observation field. An advisory write lock coordinates checks and atomic rebuild
+publication without holding SQLite transactions across network waits.
+
+Live testing showed that Namecheap marks inexpensive numeric-class names as
+premium, so exclusion is opt-in (`--exclude-premium`). Unknown currency/term or
+price fields cannot satisfy explicit price ceilings. Reported premium amounts
+are stored without inventing missing quote context or using generic TLD pricing.
+
+`NAMECHEAP_USERNAME`, `NAMECHEAP_API_KEY`, and `NAMECHEAP_CLIENT_IP` come from the
+environment. Neither logs nor SQLite persist credentials or raw authenticated
+request URLs. The client calls only `namecheap.domains.check` over HTTPS; it
+blocks redirects and never invokes registration/purchase endpoints.
+Local connection settings are loaded by mise from an ignored `mise.local.toml`
+with owner-only permissions and API-key redaction. That file is not committed.
+
+Validation: all 21 tests pass, covering budgets, cache reuse, partial responses,
+malformed results, Retry-After, interruption, redaction, price eligibility,
+preview behavior, and write coordination. A one-request live smoke check on
+`111111.xyz`, `31415926.xyz`, and `314159265.xyz` succeeded; all three were reported
+unavailable and persisted. A repeat run reused all three observations with zero
+requests. No broad catalog scan was performed.
 
 ## Validation and observed results
 

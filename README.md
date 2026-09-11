@@ -129,9 +129,63 @@ and renewal terms at checkout; discovery never reserves or purchases a name.
 
 DNS absence and missing RDAP records/status fields do not prove a name can be
 registered. Registrar verification provides the practical purchase answer.
-Namecheap is the intended verification provider; catalog construction and the
+Namecheap verification is an explicit CLI action; catalog construction and the
 viewer do not call it. See [Namecheap's check API](https://www.namecheap.com/support/api/methods/domains/check/)
 and the [RDAP specification](https://www.rfc-editor.org/rfc/rfc9083.html).
+
+## Check a selected shortlist with Namecheap
+
+Configure `NAMECHEAP_USERNAME`, `NAMECHEAP_API_KEY`, and `NAMECHEAP_CLIENT_IP` in
+your environment or the ignored `mise.local.toml` `[env]` section. Use
+`redact = true` for the API key in mise and restrict that file to your user.
+The IP must be your public IPv4 allowlisted in Namecheap's
+[API settings](https://www.namecheap.com/support/api/intro/). Credentials are read
+only when a live request is needed; they are not stored in SQLite or logs.
+Live checks currently use macOS/Linux deadline controls.
+
+```sh
+# Review the exact catalog selection without credentials, writes, or requests.
+uv run xyz.py check --length 8 --pattern constant --limit 20 --preview
+
+# Check that selection, saving each completed response to SQLite.
+uv run xyz.py check --length 8 --pattern constant --limit 20
+
+# Check explicit catalog names or a plaintext/CSV shortlist exported from the site.
+uv run xyz.py check --number 31415926.xyz --number 314159265.xyz
+uv run xyz.py check --input shortlist.csv --max-checks 30 --target 5
+```
+
+Names must already exist in the catalog. Explicit inputs are validated before
+requests and are still narrowed by any supplied filters. Defaults select at most
+200 candidates, submit at most 50 distinct names, make at most 20 HTTP attempts,
+and stop after 60 seconds or 10 eligible available results. Every retry consumes
+the request budget. Completed observations survive interruption; a rebuild cannot
+replace the database while checks are in progress.
+
+Successful Namecheap observations are reused for 15 minutes by default, before
+spending new requests. `--cache-minutes` changes that window; `--refresh` forces
+new checks. Unknown results are retried rather than treated as cached success.
+Refresh the website after checking to see states, times, price classes, and any
+check errors. Its detail view uses a 15-minute reference window for observation
+age; that label does not guarantee continued availability.
+
+Premium status is displayed, not automatically rejected: Namecheap can mark the
+inexpensive numeric class as premium. Use `--exclude-premium` if you want only
+confirmed non-premium names to count toward the result target. Availability
+remains separate from this eligibility filter.
+
+The check API can supply premium price amounts without currency, term, or complete
+fee context. These are saved as reported, with an explicit note; ordinary
+per-domain prices may remain unquoted. Optional `--max-registration` and
+`--max-renewal` ceilings require `--currency` and a confirmed one-year quote in
+that currency. Unknown quote context cannot pass a price ceiling, even when a
+raw amount looks inexpensive. Ceilings compare base prices, excluding fees/taxes.
+Verify the final purchase and renewal terms at checkout.
+
+Output is CSV with cached/eligible flags; budgets and stop reasons go to stderr.
+Running out of candidates or budget is a normal partial result. Authentication
+and configuration failures stop promptly; throttling/transient errors have at
+most two retries and respect `Retry-After`. The tool never registers a domain.
 
 ## Earlier scanner
 

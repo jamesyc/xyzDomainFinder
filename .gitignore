@@ -4,6 +4,7 @@ __pycache__/
 *.py[cod]
 .env
 .env.*
+mise.local.toml
 *.db
 *.db-*
 *.sqlite*
