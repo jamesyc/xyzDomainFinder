@@ -31,10 +31,11 @@ and producing a useful shortlist repeatedly.
 
 1. **Describe what interests you.** Choose lengths and patterns, supply meaningful
    numbers, or narrow the search with a prefix or suffix.
-2. **Generate and rank locally.** Repeated blocks, palindromes, sequences, and
-   explicitly selected dates provide a manageable candidate pool. Each result
-   includes the reason it matches. Ranking expresses your preferences; it is
-   not an appraisal of resale value.
+2. **Generate and rank locally.** Repeated blocks, palindromes, sequences, paired
+   digits, round numbers, memorable chunks, and explicitly selected dates provide
+   a manageable candidate pool. The shortlist mixes selected pattern families,
+   and each result includes the reason it matches. Ranking expresses your
+   preferences; it is not an appraisal of resale value.
 3. **Review a small list.** Export names for a registrar's bulk search. Candidate
    generation needs no account, API credentials, or network access.
 4. **Verify the names you like.** Check registration availability and prices
