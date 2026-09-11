@@ -56,7 +56,8 @@ h1>span{color:var(--purple)}
 h2{font-size:1rem;font-weight:650;margin:0}
 .panel-title span{font-size:.75rem;color:#969cac}
 .active-pattern{background:#f5f3fc;padding:6px 9px;border-radius:5px;color:#7866aa!important}
-#filters{display:flex;align-items:center;gap:12px;padding:0 25px 22px}
+#filters{display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:0 25px 22px}
+#collection{max-width:none}
 .search-field{flex:1;display:flex;align-items:center;gap:10px;border:1px solid #dfe3ed;border-radius:7px;min-width:170px;padding:0 12px;height:42px}
 .search-field>span{font-size:1.5rem;color:#8d94a9;line-height:1}
 .search-field input{border:0;outline:0;min-width:0;width:100%;font-size:.82rem;color:#3c4358;background:transparent}

@@ -20,6 +20,12 @@ and nine-digit collections; search digits; filter by interesting property or
 minimum score; open a name to see every contributing rule. Export downloads all
 matching results, not just the current page. **Refresh data** rereads SQLite.
 
+Choose **Collection → Repeated years · 1900–2049** to explore `19001900.xyz`
+through `20492049.xyz`, including their saved availability checks. Combine it
+with **Status → Available** or other filters, and export the matching results.
+The [repeated-years view](http://127.0.0.1:8765/?collection=repeated_years) opens
+this collection directly.
+
 Browsing makes no registrar requests. To check names, select up to 50 across
 pages, choose **Review selected check**, inspect the exact names and limits, then
 choose **Start Namecheap check**. Recent observations are reused unless you

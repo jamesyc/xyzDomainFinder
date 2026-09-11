@@ -192,6 +192,8 @@ def _build(path, rows, selection, stats, replace=False):
 
 def where(filters):
     clauses,params=[],[]
+    if filters.get('collection') == 'repeated_years':
+        clauses.append("length=8 AND substr(label,1,4)=substr(label,5,4) AND substr(label,1,4) BETWEEN '1900' AND '2049'")
     patterns=filters.get('pattern') or []
     if isinstance(patterns,str): patterns=[patterns]
     if patterns:

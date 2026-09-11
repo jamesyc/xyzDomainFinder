@@ -174,6 +174,25 @@ class CatalogTests(unittest.TestCase):
         catalog.build(self.path,[rows[0]],{}, {'6':stats['6']},True)
         self.assertEqual(catalog.detail(self.path,'888888.xyz')['registration_price'],'0.99')
 
+    def test_repeated_year_collection_boundaries_status_paging_and_export(self):
+        names=[str(year)*2 for year in range(1900,2050)]
+        labels=names+['18991899','20502050','19001901','1900190','190019000']
+        rows=[row(label,index) for index,label in enumerate(labels,1)]
+        stats={str(n):{'examined':len(rows),'retained':sum(r['length']==n for r in rows),'capped':False} for n in (6,7,8,9)}
+        catalog.build(self.path,rows,{},stats)
+        filters=viewer.query_options('collection=repeated_years')
+        first=catalog.page(self.path,filters,100)
+        second=catalog.page(self.path,filters,100,100)
+        self.assertEqual(first['total'],150)
+        self.assertEqual({r['domain'] for r in first['rows']+second['rows']},{name+'.xyz' for name in names})
+        self.assertEqual(len(list(catalog.export_rows(self.path,filters))),150)
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("UPDATE domains SET availability='available' WHERE domain IN ('19001900.xyz','20502050.xyz')")
+        filters=viewer.query_options('collection=repeated_years&state=available')
+        self.assertEqual([r['domain'] for r in viewer.snapshot(self.path,filters)['rows']],['19001900.xyz'])
+        self.assertEqual([r['domain'] for r in catalog.export_rows(self.path,filters)],['19001900.xyz'])
+        self.assertEqual(catalog.page(self.path,{'collection':'repeated_years','length':7})['total'],0)
+
     def test_migrate_v1_preserves_observations(self):
         with closing(sqlite3.connect(self.path)) as db, db:
             db.executescript('CREATE TABLE metadata(key TEXT,value TEXT); CREATE TABLE domains(domain TEXT,availability TEXT,checked_at TEXT,provider TEXT,registration_price TEXT,renewal_price TEXT,currency TEXT);')
@@ -208,7 +227,7 @@ class ViewerTests(unittest.TestCase):
                 connection.request('GET','/export.csv?length=6&min_score=70&page_size=1')
                 response=connection.getresponse();self.assertIn('attachment',response.getheader('Content-Disposition'))
                 self.assertEqual(len(list(csv.DictReader(io.StringIO(response.read().decode())))),2)
-                for endpoint in ('/api/catalog?page=-1','/api/catalog?length=10','/api/catalog?pattern=bad','/api/catalog?page_size=1000','/api/catalog?min_score=-1'):
+                for endpoint in ('/api/catalog?page=-1','/api/catalog?length=10','/api/catalog?pattern=bad','/api/catalog?collection=bad','/api/catalog?page_size=1000','/api/catalog?min_score=-1'):
                     connection.request('GET',endpoint);response=connection.getresponse()
                     self.assertEqual(response.status,400);response.read()
                 for endpoint in ('/.env','/domains.sqlite3','/../xyz.py'):

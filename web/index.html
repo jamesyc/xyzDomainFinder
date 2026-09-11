@@ -37,6 +37,7 @@
       <section class="catalog-panel" aria-label="Domain catalog">
         <div class="panel-title"><div><h2>Explore candidates</h2><span id="result-count" aria-live="polite">Loading catalog…</span></div><span id="active-pattern" class="active-pattern">All patterns</span></div>
         <form id="filters" role="search">
+          <label class="select-field collection-field"><span>Collection</span><select id="collection"><option value="">All candidates</option><option value="repeated_years">Repeated years · 1900–2049</option></select></label>
           <label class="search-field"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Search digits or a domain…" aria-label="Search digits or domain" autocomplete="off"></label>
           <label class="select-field"><span>Min. score</span><input id="min-score" type="number" min="0" step="1" value="0" aria-label="Minimum score"></label>
           <label class="select-field"><span>Status</span><select id="state"><option value="">All statuses</option><option value="unchecked">Unchecked</option><option value="available">Available</option><option value="unavailable">Unavailable</option><option value="unknown">Unknown</option></select></label>

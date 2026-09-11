@@ -21,7 +21,7 @@ ROUTES={'/':('index.html','text/html'),'/app.js':('app.js','text/javascript'),'/
 
 def query_options(query):
     params=parse_qs(query)
-    allowed={'search','pattern','length','state','min_score','page','page_size','domain'}
+    allowed={'search','pattern','length','state','min_score','page','page_size','domain','collection'}
     if set(params)-allowed: raise ValueError('Unknown query parameter')
     result={}
     for key,values in params.items():
@@ -34,6 +34,7 @@ def query_options(query):
             if key == 'page_size' and value > 100: raise ValueError('Page size must not exceed 100')
             if key == 'min_score' and value < 0: raise ValueError('Minimum score must be nonnegative')
         elif key == 'pattern' and value not in scoring.RULES: raise ValueError('Unknown property')
+        elif key == 'collection' and value != 'repeated_years': raise ValueError('Unknown collection')
         elif key == 'state' and value not in ('unchecked','available','unavailable','unknown'): raise ValueError('Unknown availability state')
         elif len(value)>100: raise ValueError('Search text is too long')
         result[key]=value

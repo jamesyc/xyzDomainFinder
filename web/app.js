@@ -22,7 +22,7 @@ const escape=(value)=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':
 const number=(value)=>Number(value).toLocaleString();
 const reasons=(row)=>row.reasons?row.reasons.split(';'):[];
 const tags=(row)=>reasons(row).map(reason=>`<span class="tag ${escape(reason)}">${escape(tagLabels[reason]||reason)}</span>`).join('');
-const params=()=>new URLSearchParams({search:$('search').value,pattern,length,state:$('state').value,min_score:$('min-score').value||'0',page:String(page),page_size:String(pageSize)});
+const params=()=>new URLSearchParams({collection:$('collection').value,search:$('search').value,pattern,length,state:$('state').value,min_score:$('min-score').value||'0',page:String(page),page_size:String(pageSize)});
 
 function toast(message){$('toast').textContent=message;$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>{$('toast').hidden=true;},2400);}
 async function copy(domain){try{await navigator.clipboard.writeText(domain);toast(`Copied ${domain}`);}catch{toast('Select the domain text to copy it manually.');}}
@@ -108,6 +108,7 @@ function reset(){clearTimeout(searchTimer);pattern='';length='';page=1;$('filter
 $('filters').addEventListener('submit',event=>event.preventDefault());
 ['search','min-score'].forEach(id=>$(id).addEventListener('input',()=>{page=1;clearTimeout(searchTimer);controller?.abort();$('export').disabled=true;searchTimer=setTimeout(load,180);}));
 $('state').addEventListener('change',()=>{page=1;load();});
+$('collection').addEventListener('change',()=>{page=1;load();});
 $('previous').addEventListener('click',()=>{page--;load();});
 $('next').addEventListener('click',()=>{page++;load();});
 $('refresh').addEventListener('click',load);
@@ -115,6 +116,7 @@ $('reset').addEventListener('click',reset);$('all-catalog').addEventListener('cl
 $('close-details').addEventListener('click',()=>{detailId++;$('details').close();});
 $('copy-detail').addEventListener('click',()=>{if(current)copy(current.domain);});
 $('export').addEventListener('click',()=>{const anchor=document.createElement('a');anchor.href='/export.csv?'+params();anchor.download='xyz-shortlist.csv';anchor.click();toast('CSV download requested');});
+if(new URLSearchParams(location.search).get('collection')==='repeated_years')$('collection').value='repeated_years';
 load();
 
 function drawSelection(){
