@@ -211,9 +211,23 @@ requirements, environment, scanner, or provisional unused Namecheap integration.
 
 No complete numeric namespace in SQLite, exhaustive online scanning, opaque
 weighted entropy/luck scores, scoring plugins, provider framework, EPP, DNS/RDAP
-fallbacks, bitsets, generic query language, or web UI. Larger candidate retention
+fallbacks, bitsets, or generic query language. Larger candidate retention
 limits remain a deliberate user choice; rejected rows do not become background
 work merely because they could be stored cheaply.
+
+## Local catalog website
+
+The requested viewing interface uses `uv run xyz.py serve` and the existing
+SQLite catalog. A stdlib HTTP server binds only to `127.0.0.1`; it serves the
+three frontend assets, a favicon, and a read-only JSON snapshot. It never exposes
+arbitrary repository files or permits database writes.
+
+The browser provides digit search, pattern/length/status filters, pagination,
+candidate details, copying, and a read-only CSV download endpoint. Counts and check statuses
+come from stored data. Refresh rereads SQLite after a rebuild. The small retained
+catalog can be filtered in the browser; server-side pagination is only warranted
+if retained datasets become substantially larger. No frontend framework, package
+installation, hosted data copy, or registrar integration is needed.
 
 ## Implementation evidence (2026-09-11)
 
@@ -226,6 +240,11 @@ work merely because they could be stored cheaply.
   to run a top-20 query; timings describe this machine, not a universal guarantee.
 - Created the local ignored `domains.sqlite3`; all 1,000 rows are unchecked and
   SQLite integrity verification returns `ok`. No Namecheap request was made.
+- Added the local browser viewer with no new dependencies. All 15 tests pass,
+  including HTTP asset/snapshot/export routes, refusal to serve repository files,
+  rejection of writes, and freshness of SQLite reads. Browser checks covered
+  digit and pattern filters, empty statuses, pagination, details, copying, export
+  action, and mobile layout without page-wide horizontal overflow.
 
 ## References
 

@@ -60,6 +60,13 @@ uv run xyz.py find --pattern palindrome --contains 88
 uv run xyz.py find --prefix 12 --format text > shortlist.txt
 ```
 
+For a browser view, run `uv run xyz.py serve` and open
+[the local catalog](http://127.0.0.1:8765). It reads the same SQLite file and lets
+you search digits, filter by pattern, length, or status, inspect a candidate,
+copy names, and export the filtered results. **Refresh data** rereads the catalog
+after a rebuild. The viewer is read-only and makes no registrar requests.
+Use `--database PATH` or `--port PORT` with `serve` to change its defaults.
+
 The default build selects six-digit names and stores at most 1,000 in
 `domains.sqlite3`. Use repeated `--length` and `--pattern` options to choose
 six- through nine-digit names and pattern families. `--keep` sets the number

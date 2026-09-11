@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Explore your ranked numeric .xyz domain shortlist.">
+  <title>xyz / Catalog</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to catalog</a>
+  <aside class="sidebar">
+    <a class="brand" href="/" aria-label="xyz catalog home"><span class="brand-mark">xyz<span>.</span></span><span class="brand-caption">DOMAIN FINDER</span></a>
+    <div class="section-label">WORKSPACE</div>
+    <button class="workspace-tab" id="all-catalog"><span aria-hidden="true">▦</span> Catalog <span id="sidebar-total" class="side-count">—</span></button>
+    <div class="section-label patterns-label">PATTERNS <span>FILTER BY</span></div>
+    <nav id="patterns" aria-label="Pattern filters"></nav>
+    <div class="sidebar-note"><strong>Pattern counts overlap.</strong><p>One name can match several patterns.</p></div>
+    <div class="sidebar-footer"><span class="local-indicator" aria-hidden="true"></span> Local catalog <span class="read-only">Read only</span></div>
+  </aside>
+  <main id="main">
+    <header class="topbar"><div><span class="breadcrumb">Workspace</span><span class="slash">/</span> Catalog</div><button id="refresh" class="quiet-button"><span aria-hidden="true">↻</span> Refresh data</button></header>
+    <div class="content">
+      <div class="page-heading"><div><div class="eyebrow">DISCOVER / NUMERIC .XYZ</div><h1>Your numeric shortlist<span>.</span></h1><p>The names that made the cut. Find one that means something.</p></div><button id="export" class="primary-button" disabled><span aria-hidden="true">↓</span> Export results</button></div>
+      <section class="metrics" aria-label="Catalog overview">
+        <div class="metric"><span>Saved candidates</span><strong id="total">—</strong><small>Retained in your catalog</small></div>
+        <div class="metric"><span>Generated candidates</span><strong id="examined">—</strong><small>Before filtering and deduplication</small></div>
+        <div class="metric"><span>Availability checked</span><strong id="checked">—</strong><small id="checked-caption">No registration checks yet</small></div>
+      </section>
+      <div id="error" role="alert" hidden></div>
+      <div id="cap-warning" class="notice" hidden>The generation cap was reached. This shortlist comes from a partially examined pool.</div>
+      <section class="catalog-panel" aria-label="Domain catalog">
+        <div class="panel-title"><div><h2>Explore candidates</h2><span id="result-count" aria-live="polite">Loading catalog…</span></div><span id="active-pattern" class="active-pattern">All patterns</span></div>
+        <form id="filters" role="search">
+          <label class="search-field"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Search digits or a domain…" aria-label="Search digits or domain" autocomplete="off"></label>
+          <label class="select-field"><span>Length</span><select id="length"><option value="">All lengths</option value="6">6 digits</option><option value="7">7 digits</option><option value="8">8 digits</option><option value="9">9 digits</option></select></label>
+          <label class="select-field"><span>Status</span><select id="state"><option value="">All statuses</option><option value="unchecked">Unchecked</option><option value="available">Available</option><option value="unavailable">Unavailable</option><option value="unknown">Unknown</option></select></label>
+        </form>
+        <div class="table-scroll"><table><thead><tr><th scope="col" class="rank-column">Rank</th><th scope="col">Domain</th><th scope="col">Why it ranks</th><th scope="col">Length</th><th scope="col">Availability</th><th scope="col"><span class="visually-hidden">Copy domain</span></th></tr></thead><tbody id="rows"></tbody></table></div>
+        <div id="empty" class="empty" hidden><div aria-hidden="true">∅</div><h3>No matching names</h3><p>Try different digits or clear your filters.</p><button id="reset" class="secondary-button">Clear filters</button></div>
+        <div class="pagination"><span id="range">—</span><div><button id="previous" class="page-button" aria-label="Previous page">←</button><span id="page">—</span><button id="next" class="page-button" aria-label="Next page">→</button></div></div>
+      </section>
+      <footer class="content-footer"><span>Rank reflects pattern preference, not resale value.</span><span id="built-at"></span></footer>
+    </div>
+  </main>
+  <dialog id="details" aria-labelledby="detail-name"><button id="close-details" class="close-button" aria-label="Close details">×</button><div class="eyebrow">CANDIDATE DETAILS</div><h2 id="detail-name"></h2><div id="detail-content"></div><button id="copy-detail" class="primary-button">Copy domain</button></dialog>
+  <div id="toast" role="status" class="toast" hidden></div>
+</body>
+</html>

@@ -138,6 +138,9 @@ def build_parser():
     find.add_argument("--state", choices=("unchecked", "available", "unavailable", "unknown"))
     find.add_argument("--limit", type=positive_int, default=50)
     find.add_argument("--format", choices=("text", "csv"), default="csv")
+    serve = commands.add_parser("serve", help="view the catalog in a local, read-only website")
+    serve.add_argument("--database", type=Path, default=Path("domains.sqlite3"))
+    serve.add_argument("--port", type=positive_int, default=8765)
     return parser
 
 
@@ -220,6 +223,13 @@ def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
+        if args.command == "serve":
+            import viewer
+
+            if args.port > 65535:
+                raise ValueError("--port must be between 1 and 65535")
+            viewer.serve(args.database, args.port)
+            return 0
         if args.command == "build":
             import catalog
 

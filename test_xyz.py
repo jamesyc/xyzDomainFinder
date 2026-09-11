@@ -3,7 +3,9 @@ import io
 import json
 import sqlite3
 import tempfile
+import threading
 import unittest
+from http.client import HTTPConnection
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import date
 from pathlib import Path
@@ -11,6 +13,7 @@ from unittest.mock import patch
 
 import xyz
 import catalog
+import viewer
 
 
 class DiscoveryTests(unittest.TestCase):
@@ -210,6 +213,58 @@ class CatalogTests(unittest.TestCase):
             self.assertEqual(metadata["cap_reached"], "true")
             self.assertEqual(metadata["row_count"], "0")
             self.assertEqual(json.loads(metadata["selection"])["max_generated"], 3)
+
+
+class ViewerTests(unittest.TestCase):
+    def test_local_snapshot_routes_are_read_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "catalog.sqlite3"
+            catalog.build(database, [("001234", ["explicit"])], {}, 1, False)
+            server = viewer.make_server(database, 0)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                connection = HTTPConnection("127.0.0.1", server.server_port, timeout=3)
+                self.addCleanup(connection.close)
+                for path in ("/", "/style.css", "/app.js", "/favicon.svg"):
+                    connection.request("GET", path)
+                    response = connection.getresponse()
+                    self.assertEqual(response.status, 200)
+                    self.assertTrue(response.read())
+                connection.request("GET", "/api/catalog")
+                response = connection.getresponse()
+                payload = json.loads(response.read())
+                self.assertEqual(payload["rows"][0]["domain"], "001234.xyz")
+                self.assertEqual(payload["rows"][0]["availability"], "unchecked")
+                self.assertIsNone(response.getheader("Access-Control-Allow-Origin"))
+                connection.request("GET", "/export.csv?search=0012&pattern=explicit&length=6&state=unchecked")
+                response = connection.getresponse()
+                self.assertIn("attachment", response.getheader("Content-Disposition"))
+                exported = list(csv.DictReader(io.StringIO(response.read().decode())))
+                self.assertEqual([row["domain"] for row in exported], ["001234.xyz"])
+                connection.request("GET", "/export.csv?search=999")
+                response = connection.getresponse()
+                self.assertEqual(list(csv.DictReader(io.StringIO(response.read().decode()))), [])
+                with sqlite3.connect(database) as db:
+                    db.execute("UPDATE domains SET availability='unknown'")
+                self.assertEqual(viewer.snapshot(database)["rows"][0]["availability"], "unknown")
+                for path in ("/domains.sqlite3", "/.env", "/../xyz.py"):
+                    connection.request("GET", path)
+                    response = connection.getresponse()
+                    self.assertEqual(response.status, 404)
+                    response.read()
+                connection.request("POST", "/api/catalog", body="{}")
+                response = connection.getresponse()
+                self.assertEqual(response.status, 501)
+                response.read()
+                connection.request("GET", "/api/catalog", headers={"Host": "untrusted.example"})
+                response = connection.getresponse()
+                self.assertEqual(response.status, 403)
+                response.read()
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join()
 
 
 if __name__ == "__main__":
