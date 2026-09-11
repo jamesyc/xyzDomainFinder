@@ -128,6 +128,12 @@ def build_parser():
     check.add_argument('--max-registration',type=price_limit,help='one-year base-price ceiling, excluding fees/taxes')
     check.add_argument('--max-renewal',type=price_limit,help='one-year base-price ceiling, excluding fees/taxes')
     check.add_argument('--currency',help='three-letter currency required when using price ceilings')
+    scan=commands.add_parser('scan',allow_abbrev=False,help='Check only unchecked catalog rows, highest score first, until stopped')
+    scan.add_argument('--database',type=Path,default=Path('domains.sqlite3'))
+    scan.add_argument('--preview',action='store_true',help='show unchecked scope without writes or requests')
+    scan.add_argument('--max-checks',type=positive_int,help='optional live-name budget for a limited run')
+    scan.add_argument('--max-requests',type=positive_int,help='optional total request budget')
+    scan.add_argument('--timeout',type=positive_int,help='optional whole-run time budget in seconds')
     serve=commands.add_parser('serve',allow_abbrev=False,help='Open the local catalog and selected-name checking workflow')
     serve.add_argument('--database',type=Path,default=Path('domains.sqlite3'))
     serve.add_argument('--port',type=positive_int,default=8765)
@@ -181,6 +187,17 @@ def collect(args):
 def main(argv=None):
     parser=build_parser();args=parser.parse_args(argv)
     try:
+        if args.command == 'scan':
+            import catalog
+            import scan
+            if args.preview:
+                import rate_limit
+                info = catalog.unchecked_info(args.database)
+                info['estimated_seconds'] = rate_limit.estimate_seconds((info['total'] + 49) // 50)
+                info['request_limits'] = dict(rate_limit.LIMITS)
+                print(json.dumps(info, indent=2))
+                return 0
+            return scan.run(args.database, max_checks=args.max_checks, max_requests=args.max_requests, timeout=args.timeout)
         if args.command == 'check':
             import catalog
             import namecheap

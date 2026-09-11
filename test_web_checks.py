@@ -122,6 +122,67 @@ class WebChecksTests(unittest.TestCase):
         self.assertEqual((status['state'], status['cached'], status['available']), ('completed', 1, 1))
         self.assertIn('requests=0', status['diagnostic'])
 
+    def test_scan_preview_and_command_are_unchecked_only(self):
+        before = self.path.read_bytes()
+        plan = self.manager.preview_scan({})
+        self.assertEqual(plan['selected'], 1)
+        self.assertEqual(plan['mode'], 'scan')
+        self.assertEqual(plan['request_limits'], {'minute': 40, 'hour': 560, 'day': 6400})
+        self.assertEqual(self.path.read_bytes(), before)
+        with self.assertRaises(ValueError):
+            self.manager.preview_scan({'state': 'available'})
+        with self.assertRaises(web_checks.Conflict):
+            self.manager.start(plan['id'])
+        progress = {'total': 1, 'processed': 1, 'remaining': 0, 'requests': 1, 'stop_reason': 'input_exhausted'}
+        process = FakeProcess(diagnostic='SCAN_PROGRESS ' + json.dumps(progress) + '\nStop: input_exhausted\n')
+        with patch('web_checks.subprocess.Popen', return_value=process) as popen:
+            self.manager.start(plan['id'], expected_mode='scan')
+            self.manager.worker.join(timeout=2)
+        command = popen.call_args.args[0]
+        self.assertIn('scan', command)
+        self.assertNotIn('--number', command)
+        self.assertNotIn('--timeout', command)
+        self.assertEqual(self.manager.status()['progress']['remaining'], 0)
+
+    def test_scan_with_no_unchecked_names_does_not_spawn(self):
+        observation = namecheap.unknown('888888.xyz', 'test')
+        with catalog.write_lock(self.path):
+            catalog.save_observations(self.path, [observation])
+        plan = self.manager.preview_scan({})
+        self.assertEqual(plan['selected'], 0)
+        with patch('web_checks.subprocess.Popen') as process, self.assertRaises(web_checks.Conflict):
+            self.manager.start(plan['id'], expected_mode='scan')
+        process.assert_not_called()
+
+    def test_scan_preview_endpoint_and_api_errors_are_json(self):
+        server = viewer.make_server(self.path, 0)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        connection = HTTPConnection('127.0.0.1', server.server_port, timeout=3)
+        headers = {'Content-Type':'application/json', 'Origin':f'http://127.0.0.1:{server.server_port}'}
+        before = self.path.read_bytes()
+        try:
+            with patch('web_checks.subprocess.Popen') as process:
+                connection.request('POST','/api/scan/preview','{}',headers)
+                response=connection.getresponse()
+                self.assertEqual(response.status,200)
+                self.assertIn('application/json',response.getheader('Content-Type'))
+                payload=json.loads(response.read())
+                self.assertEqual(payload['selected'],1)
+                self.assertEqual(payload['mode'],'scan')
+                process.assert_not_called()
+            for endpoint,request_headers,status in (
+                ('/api/missing',headers,404),('/api/scan/preview',{'Content-Type':'application/json'},403),
+                ('/api/scan/preview',{'Origin':headers['Origin'],'Content-Type':'text/plain'},415)):
+                connection.request('POST',endpoint,'{}',request_headers)
+                response=connection.getresponse()
+                self.assertEqual(response.status,status)
+                self.assertIn('application/json',response.getheader('Content-Type'))
+                self.assertIn('error',json.loads(response.read()))
+            self.assertEqual(self.path.read_bytes(),before)
+        finally:
+            connection.close();server.checks.close();server.shutdown();server.server_close();thread.join()
+
     def test_preview_expiry_and_catalog_replacement(self):
         plan = self.manager.preview({'domains': ['888888.xyz']})
         with patch('web_checks.time.monotonic', return_value=self.manager.plan[1] + 1), self.assertRaises(web_checks.Conflict):

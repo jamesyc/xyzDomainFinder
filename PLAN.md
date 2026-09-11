@@ -1,14 +1,15 @@
 # Scored numeric-domain discovery plan
 
-## Next planned feature: scan all unchecked
+## Implemented: scan all unchecked
 
 [SCAN_PLAN.md](SCAN_PLAN.md) specifies a score-ordered scan of only
 `availability = 'unchecked'` rows. Saved domain statuses are the checkpoint:
 Cancel keeps completed results, and the next Start runs the same highest-score
 unchecked query. No resume button, scan-item table, or persistent cursor is needed.
 Known available, unavailable, and unknown rows are excluded even when old.
-Only request-rate accounting needs additional durable state. This is a plan only;
-the existing selected-name checker is unchanged and no bulk scan has been started.
+Only request-rate accounting needs additional durable state. Both checking modes
+share a persisted limiter set to 80% of the published limits: 40/minute, 560/hour,
+and 6,400/day. The bulk scan starts only through an explicit user action.
 
 ## Outcome and latest scope
 
@@ -454,3 +455,15 @@ was tested using fresh cached observations with credentials disabled; it complet
 with zero network requests. No new live Namecheap query was needed for this work.
 
 The current full suite has 30 passing tests. The live catalog passes SQLite integrity and score-sum checks; all three existing observations remain unchanged.
+
+## Unchecked scan and preview-error follow-through
+
+The unchecked-only scan is implemented with cooperative cancellation, per-response
+commits, no domain cursor, and a durable account-scoped request ledger. The website
+shows scope, progress, request waits, and cancellation; Start always uses the same
+unchecked query. Selected checks retain their small-run budgets and share the ledger.
+
+The reported JSON.parse error came from a stale server returning HTML for the new
+scan endpoint. Restarting loaded the endpoint; JSON API error responses and a
+shared browser parser now provide actionable errors instead of raw parse failures.
+Both frontend and HTTP regression tests cover this case.

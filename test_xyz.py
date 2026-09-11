@@ -6,7 +6,7 @@ import sqlite3
 import tempfile
 import threading
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import closing, redirect_stderr, redirect_stdout
 from datetime import date
 from http.client import HTTPConnection
 from pathlib import Path
@@ -141,7 +141,7 @@ class CatalogTests(unittest.TestCase):
         with patch('socket.socket',side_effect=AssertionError('network access')):
             status,_,_=cli('build','--database',str(self.path),'--keep-per-length','5','--pattern','uniform')
         self.assertEqual(status,0)
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             self.assertEqual(db.execute('SELECT length,count(*),min(rank),max(rank) FROM domains GROUP BY length').fetchall(),[(n,5,1,5) for n in (6,7,8,9)])
             self.assertEqual(db.execute("SELECT COUNT(*) FROM domains WHERE availability!='unchecked' OR checked_at IS NOT NULL").fetchone()[0],0)
             for score,properties in db.execute('SELECT score,properties_json FROM domains'):
@@ -163,7 +163,7 @@ class CatalogTests(unittest.TestCase):
 
     def test_reuse_replace_and_failed_publication(self):
         rows,stats=make_catalog(self.path)
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             db.execute("UPDATE domains SET availability='available',provider='test',registration_price='0.99' WHERE domain='888888.xyz'")
         self.assertFalse(catalog.build(self.path,rows,{},stats))
         with self.assertRaises(ValueError): catalog.build(self.path,rows,{'different':True},stats)
@@ -175,7 +175,7 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(catalog.detail(self.path,'888888.xyz')['registration_price'],'0.99')
 
     def test_migrate_v1_preserves_observations(self):
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             db.executescript('CREATE TABLE metadata(key TEXT,value TEXT); CREATE TABLE domains(domain TEXT,availability TEXT,checked_at TEXT,provider TEXT,registration_price TEXT,renewal_price TEXT,currency TEXT);')
             db.executemany('INSERT INTO metadata VALUES (?,?)',[('ranking_version','pattern-shortlist-v1'),('row_count','1')])
             db.execute("INSERT INTO domains VALUES ('888888.xyz','available','2026-09-11','test','0.99','0.99','USD')")

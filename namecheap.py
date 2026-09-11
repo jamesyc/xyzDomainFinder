@@ -29,6 +29,10 @@ class BudgetEnded(Exception):
     pass
 
 
+class Cancelled(Exception):
+    pass
+
+
 def credentials():
     names = ('NAMECHEAP_USERNAME', 'NAMECHEAP_API_KEY', 'NAMECHEAP_CLIENT_IP')
     missing = [name for name in names if not os.getenv(name, '').strip()]
@@ -163,33 +167,55 @@ def network_deadline(seconds):
 
 
 class Client:
-    def __init__(self, max_requests, deadline):
+    def __init__(self, max_requests, deadline, *, ledger=None, stop_event=None, progress=None):
         self.auth = credentials()
         if not hasattr(signal, 'setitimer'):
             raise APIError('Live checks currently require macOS or Linux for enforced deadlines')
         self.max_requests, self.deadline = max_requests, deadline
         self.requests = 0
-        self.next_request = 0.0
+        if ledger is None:
+            from rate_limit import Ledger
+            ledger = Ledger(self.auth['ApiUser'])
+        self.ledger = ledger
+        self.stop_event = stop_event
+        self.progress = progress
         self.opener = urllib.request.build_opener(NoRedirect)
 
-    def wait(self, delay):
+    def wait(self, delay, reason='retry backoff'):
+        if self.stop_event is not None and self.stop_event.is_set():
+            raise Cancelled()
         remaining = self.deadline - time.monotonic()
         if remaining <= 0 or delay >= remaining:
             raise BudgetEnded('deadline')
+        if delay > 0 and self.progress:
+            self.progress(wait_seconds=delay, wait_reason=reason, wait_until=time.time() + delay)
         if delay > 0:
-            time.sleep(delay)
+            if self.stop_event is None:
+                time.sleep(delay)
+            else:
+                until = time.monotonic() + delay
+                while time.monotonic() < until:
+                    if self.stop_event.wait(min(1, until - time.monotonic())):
+                        raise Cancelled()
+        if delay > 0 and self.progress:
+            self.progress(wait_seconds=0, wait_reason=None, wait_until=None)
 
     def check(self, domains):
         if not 1 <= len(domains) <= 50:
             raise ValueError('A Namecheap batch must contain 1–50 names')
         if self.requests >= self.max_requests:
             raise BudgetEnded('request_budget')
-        self.wait(max(0, self.next_request - time.monotonic()))
+        while True:
+            self.wait(0)
+            delay, reason = self.ledger.reserve()
+            if delay <= 0:
+                break
+            self.wait(delay, reason)
+        self.wait(0)
         remaining = self.deadline - time.monotonic()
         if remaining <= 0:
             raise BudgetEnded('deadline')
         self.requests += 1
-        self.next_request = time.monotonic() + 3.1
         query = urllib.parse.urlencode({**self.auth, 'Command': 'namecheap.domains.check',
                                        'DomainList': ','.join(domains)})
         request = urllib.request.Request(ENDPOINT + '?' + query, headers={'User-Agent': 'xyzDomainFinder/0.1'})
@@ -204,6 +230,8 @@ class Client:
             status = error.code
             delay = retry_after(error.headers.get('Retry-After'))
             error.close()
+            if delay is not None and status in (408, 429, 500, 502, 503, 504):
+                self.ledger.defer(delay)
             raise APIError(f'http_{status}', status in (408, 429, 500, 502, 503, 504), delay) from None
         except (urllib.error.URLError, TimeoutError, OSError):
             raise APIError('network_error', True) from None

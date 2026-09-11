@@ -7,7 +7,7 @@
   <title>xyz / Catalog</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css">
-  <script src="/app.js" defer></script>
+  <script src="/app.js" type="module"></script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to catalog</a>
@@ -23,7 +23,7 @@
   <main id="main">
     <header class="topbar"><div><span class="breadcrumb">Workspace</span><span class="slash">/</span> Catalog</div><button id="refresh" class="quiet-button"><span aria-hidden="true">↻</span> Refresh data</button></header>
     <div class="content">
-      <div class="page-heading"><div><div class="eyebrow">DISCOVER / NUMERIC .XYZ</div><h1>Your scored collection<span>.</span></h1><p>Explore six- through nine-digit names and the traits behind their scores.</p></div><button id="export" class="primary-button" disabled><span aria-hidden="true">↓</span> Export results</button></div>
+      <div class="page-heading"><div><div class="eyebrow">DISCOVER / NUMERIC .XYZ</div><h1>Your scored collection<span>.</span></h1><p>Explore six- through nine-digit names and the traits behind their scores.</p></div><div class="heading-actions"><button id="scan-unchecked" class="primary-button">Scan all unchecked</button><button id="export" class="secondary-button" disabled>Export results</button></div></div>
       <section class="metrics" aria-label="Catalog overview">
         <div class="metric"><span>Saved candidates</span><strong id="total">—</strong><small>Retained in your catalog</small></div>
         <div class="metric"><span>Generated candidates</span><strong id="examined">—</strong><small>Before filtering and deduplication</small></div>
@@ -51,6 +51,7 @@
   </main>
   <dialog id="details" aria-labelledby="detail-name"><button id="close-details" class="close-button" aria-label="Close details">×</button><div class="eyebrow">CANDIDATE DETAILS</div><h2 id="detail-name"></h2><div id="detail-content"></div><button id="copy-detail" class="primary-button">Copy domain</button></dialog>
   <dialog id="check-dialog" aria-labelledby="check-title"><button id="close-check-dialog" class="close-button" aria-label="Close check preview">×</button><div class="eyebrow">NAMECHEAP AVAILABILITY</div><h2 id="check-title">Review selected names</h2><p id="check-preview-note"></p><div id="check-preview-list"></div><label class="force-refresh"><input id="force-refresh" type="checkbox"> Recheck even if recent results are saved</label><p id="check-preview-error" role="alert" hidden></p><button id="start-check" class="primary-button" disabled>Start Namecheap check</button></dialog>
+  <dialog id="scan-dialog" aria-labelledby="scan-title"><button id="close-scan-dialog" class="close-button" aria-label="Close scan preview">×</button><div class="eyebrow">UNCHECKED ONLY · HIGHEST SCORE FIRST</div><h2 id="scan-title">Scan all unchecked names</h2><p id="scan-scope"></p><p class="detail-note">Available, unavailable, and unknown names are skipped, even if their results are old. Cancel at any time; saved results stay in the database. Start again to work through whatever is still unchecked.</p><div id="scan-cohorts" class="family-awards"></div><p id="scan-rate" class="detail-note"></p><h3 class="breakdown-title">First names in score order</h3><div id="scan-examples"></div><p id="scan-error" role="alert" hidden></p><button id="start-scan" class="primary-button" disabled>Start scan</button></dialog>
   <div id="toast" role="status" class="toast" hidden></div>
 </body>
 </html>

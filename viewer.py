@@ -15,7 +15,7 @@ import scoring
 import web_checks
 
 ASSETS=Path(__file__).with_name('web')
-ROUTES={'/':('index.html','text/html'),'/app.js':('app.js','text/javascript'),
+ROUTES={'/':('index.html','text/html'),'/app.js':('app.js','text/javascript'),'/api.mjs':('api.mjs','text/javascript'),
         '/style.css':('style.css','text/css'),'/favicon.svg':('favicon.svg','image/svg+xml')}
 
 
@@ -52,13 +52,21 @@ def make_server(database,port=8765):
     database=Path(database).resolve()
 
     class Handler(BaseHTTPRequestHandler):
+        def send_error(self, code, message=None, explain=None):
+            if urlsplit(getattr(self, 'path', '')).path.startswith('/api/'):
+                error = message or self.responses.get(code, ('Request failed',))[0]
+                self.respond(code, 'application/json', json.dumps({'error': error}).encode())
+            else:
+                super().send_error(code, message, explain)
+
         def do_POST(self):
             host = self.headers.get('Host')
             if (host not in {f'127.0.0.1:{self.server.server_port}', f'localhost:{self.server.server_port}'}
                     or self.headers.get('Origin') != f'http://{host}'):
                 self.send_error(403); return
             path = urlsplit(self.path).path
-            if path not in ('/api/check/preview', '/api/check/start', '/api/check/cancel'):
+            if path not in ('/api/check/preview', '/api/check/start', '/api/check/cancel',
+                            '/api/scan/preview', '/api/scan/start'):
                 self.send_error(404); return
             if self.headers.get('Content-Type', '').split(';')[0] != 'application/json':
                 self.send_error(415); return
@@ -70,11 +78,16 @@ def make_server(database,port=8765):
                 payload = json.loads(self.rfile.read(length))
                 if path == '/api/check/preview':
                     result = self.server.checks.preview(payload)
+                elif path == '/api/scan/preview':
+                    result = self.server.checks.preview_scan(payload)
                 else:
                     if not isinstance(payload, dict) or set(payload) != {'id'} or not isinstance(payload['id'], str):
                         raise ValueError('Expected the preview or check identifier')
-                    result = (self.server.checks.start(payload['id']) if path == '/api/check/start'
-                              else self.server.checks.cancel(payload['id']))
+                    if path == '/api/scan/start':
+                        result = self.server.checks.start(payload['id'], expected_mode='scan')
+                    else:
+                        result = (self.server.checks.start(payload['id']) if path == '/api/check/start'
+                                  else self.server.checks.cancel(payload['id']))
                 self.respond(200, 'application/json', json.dumps(result).encode())
             except web_checks.Conflict as error:
                 self.respond(409, 'application/json', json.dumps({'error': str(error)}).encode())

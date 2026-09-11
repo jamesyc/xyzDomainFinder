@@ -1,3 +1,4 @@
+import {requestJSON} from './api.mjs';
 const $ = (id) => document.getElementById(id);
 const families = [
   ['uniform','Uniform digits','●'],['repeat','Repeated blocks','↻'],['palindrome','Palindromes','◇'],
@@ -14,6 +15,7 @@ const tagLabels={uniform:'Uniform',repeat:'Repeat',palindrome:'Palindrome',seque
 const states={unchecked:'Unchecked',available:'Available',unavailable:'Unavailable',unknown:'Unknown'};
 const pageSize=20;
 const selected=new Set();
+let scanPreview=null,scanPreviewRevision=0;
 let checkJob=null,checkTimer,preview=null,previewRevision=0,finishNotified='',statusRevision='',checkPollRevision=0;
 let data=[],total=0,metadata={},pattern='',length='',page=1,current=null,toastTimer,searchTimer,requestId=0,controller,detailId=0;
 const escape=(value)=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -31,10 +33,8 @@ async function detail(row){
   $('detail-content').textContent='Loading score breakdown…';
   $('details').showModal();
   try{
-    const response=await fetch('/api/domain?'+new URLSearchParams({domain:row.domain}),{cache:'no-store'});
-    const result=await response.json();
+    const result=await requestJSON('/api/domain?'+new URLSearchParams({domain:row.domain}));
     if(id!==detailId)return;
-    if(!response.ok)throw new Error(result.error||'Candidate could not be read.');
     const price=value=>value==null?'Not quoted':`${value} ${result.currency||'(currency unknown)'}`;
     const totals={};
     result.properties.forEach(prop=>{totals[prop.family]=(totals[prop.family]||0)+prop.awarded;});
@@ -90,10 +90,8 @@ async function load(){
   $('refresh').disabled=true;$('export').disabled=true;$('error').hidden=true;
   $('rows').setAttribute('aria-busy','true');
   try{
-    const response=await fetch('/api/catalog?'+params(),{cache:'no-store',signal:controller.signal});
-    const payload=await response.json();
+    const payload=await requestJSON('/api/catalog?'+params(),{signal:controller.signal});
     if(id!==requestId)return;
-    if(!response.ok)throw new Error(payload.error||'The catalog could not be loaded.');
     data=payload.rows;total=payload.total;metadata=payload.metadata;
     const last=Math.max(1,Math.ceil(total/pageSize));
     if(page>last){page=last;return load();}
@@ -122,6 +120,7 @@ load();
 function drawSelection(){
   $('selection-count').textContent=selected.size?`${selected.size} / 50 selected · across pages`:'Select up to 50 names to check';
   $('clear-selection').disabled=!selected.size;
+  $('scan-unchecked').disabled=['running','cancelling'].includes(checkJob?.state)||(metadata.row_count!==undefined&&metadata.row_count===metadata.checked);
   $('review-check').disabled=!selected.size||['running','cancelling'].includes(checkJob?.state);
   const selectedOnPage=data.filter(row=>selected.has(row.domain)).length;
   $('select-page').checked=Boolean(data.length)&&selectedOnPage===data.length;
@@ -131,10 +130,7 @@ function drawSelection(){
 }
 
 async function postCheck(path,payload){
-  const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-  const result=await response.json();
-  if(!response.ok)throw new Error(result.error||'The check could not be started.');
-  return result;
+  return requestJSON(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
 }
 
 async function reviewCheck(resetRefresh=true){
@@ -157,13 +153,26 @@ async function reviewCheck(resetRefresh=true){
 
 function drawCheck(){
   $('check-progress').hidden=!checkJob;
-  if(!checkJob)return;
+  if(!checkJob){drawSelection();return;}
+  const scanning=checkJob.mode==='scan';
   const titles={running:'Checking selected names',cancelling:'Stopping the check…',completed:'Check finished',cancelled:'Check cancelled',failed:'Check needs attention'};
   const stops={target_reached:'Selection completed.',target_reached_from_cache:'Recent observations covered the selection.',input_exhausted:'Selected names processed.',deadline:'Time limit reached.',request_budget:'Request limit reached.',name_budget:'Live-name limit reached.',provider_error:'Namecheap rejected a request.',configuration_error:'Check the connection settings.',interrupted:'Completed results were saved.'};
   const stop=(checkJob.diagnostic.match(/Stop: ([a-z_]+)/)||[])[1];
   $('check-status').textContent=titles[checkJob.state]||checkJob.state;
   $('check-summary').textContent=`${checkJob.completed} of ${checkJob.selected} results saved or reused · ${checkJob.available} available · ${checkJob.unavailable} unavailable · ${checkJob.unknown} unknown · ${checkJob.cached} cached. ${stops[stop]||''}`;
-  $('check-meter').max=checkJob.selected;$('check-meter').value=checkJob.completed;
+  if(scanning){
+    const p=checkJob.progress||{};
+    const waiting=p.wait_until?Math.max(0,Math.ceil(p.wait_until-Date.now()/1000)):0;
+    $('check-status').textContent=checkJob.state==='running'?(waiting?'Scan waiting for a request slot':'Scanning unchecked names'):checkJob.state==='cancelling'?'Stopping scan…':checkJob.state==='cancelled'?'Scan stopped':checkJob.state==='completed'?'Scan finished':'Scan needs attention';
+    const reason={cancelled:'Saved results are kept. Start again to continue with unchecked names.',input_exhausted:'No unchecked names remain.',service_failures:'Repeated service errors stopped the scan.',storage_error:'A local storage error stopped the scan.',provider_error:'Check the Namecheap connection settings.',name_budget:'Live-name budget reached.',request_budget:'Request budget reached.',deadline:'Time budget reached.'}[p.stop_reason]||'';
+    const waitText=waiting?` Waiting ${waiting>=60?Math.ceil(waiting/60)+' min':waiting+' sec'}: ${p.wait_reason}.`:'';
+    const seconds=['running','cancelling'].includes(checkJob.state)&&checkJob.started_at?Math.max(0,Date.now()/1000-checkJob.started_at):p.elapsed;
+    const elapsed=seconds===undefined?'':` ${Math.floor(seconds/60)} min elapsed.`;
+    const current=p.current_score===null||p.current_score===undefined?'':` Current batch: ${p.current_length} digits, score ${p.current_score}.`;
+    $('check-summary').textContent=`${number(p.processed??checkJob.completed)} processed · ${number(p.remaining??checkJob.selected-checkJob.completed)} still unchecked · ${number(p.available??checkJob.available)} available · ${number(p.unavailable??checkJob.unavailable)} unavailable · ${number(p.unknown??checkJob.unknown)} unknown · ${number(p.requests||0)} requests.${elapsed}${current}${waitText} ${reason}`;
+  }
+  $('check-meter').max=checkJob.selected||1;$('check-meter').value=checkJob.completed;
+  $('cancel-check').textContent=scanning?'Cancel scan':'Cancel check';
   $('check-log').textContent=checkJob.diagnostic||'Waiting for results…';
   $('cancel-check').hidden=!['running','cancelling'].includes(checkJob.state);
   $('cancel-check').disabled=checkJob.state==='cancelling';
@@ -174,10 +183,8 @@ async function pollCheck(){
   const revisionId=++checkPollRevision;
   clearTimeout(checkTimer);
   try{
-    const response=await fetch('/api/check/status',{cache:'no-store'});
-    if(!response.ok)throw new Error('Check status could not be read');
-    const nextJob=await response.json();if(revisionId!==checkPollRevision)return;checkJob=nextJob;drawCheck();
-    if(!checkJob)return;
+    const nextJob=await requestJSON('/api/check/status');if(revisionId!==checkPollRevision)return;const previousJob=checkJob;checkJob=nextJob;drawCheck();
+    if(!checkJob){if(previousJob){statusRevision='';load();}return;}
     const revision=`${checkJob.id}:${checkJob.completed}:${checkJob.state}`;
     if(revision!==statusRevision){statusRevision=revision;load();}
     if(['running','cancelling'].includes(checkJob.state))checkTimer=setTimeout(pollCheck,1000);
@@ -210,3 +217,29 @@ $('cancel-check').addEventListener('click',async()=>{
   catch(error){toast(error.message);pollCheck();}
 });
 pollCheck();
+
+async function reviewScan(){
+  const revision=++scanPreviewRevision;scanPreview=null;
+  $('scan-error').hidden=true;$('start-scan').disabled=true;$('start-scan').textContent='Start scan';
+  $('scan-scope').textContent='Counting unchecked names…';$('scan-examples').textContent='';$('scan-rate').textContent='';$('scan-cohorts').textContent='';
+  if(!$('scan-dialog').open)$('scan-dialog').showModal();
+  try{
+    const result=await postCheck('/api/scan/preview',{});
+    if(revision!==scanPreviewRevision)return;
+    scanPreview=result;
+    $('scan-scope').textContent=`${number(result.selected)} unchecked names across the whole catalog, highest score first. The current table filters do not restrict this scan.`;
+    $('scan-cohorts').innerHTML=[6,7,8,9].map(n=>`<span>${n} digits <b>${number(result.by_length[n]||0)}</b></span>`).join('');
+    $('scan-rate').textContent=`Up to 50 domains per request. Limits: ${result.request_limits.minute}/minute, ${result.request_limits.hour}/hour, ${number(result.request_limits.day)}/day — 80% of Namecheap’s published limits. Planning baseline: about ${Math.max(1,Math.ceil(result.estimated_seconds/60))} minutes with unused quotas; latency and rate waits add time. Keep this local server running. You can cancel during waits.`;
+    $('scan-examples').innerHTML=result.names.map(row=>`<div class="preview-row"><code>${escape(row.domain)}</code><span>${escape(row.score)} pts · ${row.length} digits</span></div>`).join('');
+    $('start-scan').disabled=!result.configured||!result.selected;
+    if(!result.configured){$('scan-error').textContent='Configure Namecheap in the local mise settings and restart the viewer.';$('scan-error').hidden=false;}
+  }catch(error){if(revision===scanPreviewRevision){$('scan-scope').textContent='The scan preview could not be loaded.';$('scan-error').textContent=error.message;$('scan-error').hidden=false;$('start-scan').textContent='Try preview again';$('start-scan').disabled=false;}}
+}
+$('scan-unchecked').addEventListener('click',reviewScan);
+$('close-scan-dialog').addEventListener('click',()=>{scanPreviewRevision++;$('scan-dialog').close();});
+$('start-scan').addEventListener('click',async()=>{
+  if(!scanPreview){reviewScan();return;}
+  $('start-scan').disabled=true;
+  try{checkJob=await postCheck('/api/scan/start',{id:scanPreview.id});scanPreview=null;$('scan-dialog').close();drawCheck();pollCheck();}
+  catch(error){scanPreview=null;$('scan-error').textContent=error.message;$('scan-error').hidden=false;$('start-scan').textContent='Refresh preview';$('start-scan').disabled=false;pollCheck();}
+});

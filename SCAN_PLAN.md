@@ -9,7 +9,7 @@ score first. The user can cancel halfway through and later start again.
 scan-item queue, persistent cursor, or scan-history table. Every start uses the
 same query against the current database.
 
-This document plans the feature only. No bulk scan is started by this change.
+This workflow is implemented. Installing or opening the website does not start a scan; Start is an explicit user action.
 
 ## Core loop
 
@@ -116,8 +116,8 @@ Sources: [check API](https://www.namecheap.com/support/api/methods/domains/check
 Initial policy:
 
 - One serial batch of at most 50 names.
-- At least six seconds between request starts.
-- Conservative app-wide ceilings: 30/minute, 600/hour, and 6,000/day.
+- At least 1.5 seconds between request starts.
+- App-wide ceilings at 80% of published limits: 40/minute, 560/hour, and 6,400/day.
 - Persist request reservations/timestamps across starts and server restarts;
   count retries too and discard records outside the required rolling window.
 - Share accounting across catalog files using the same configured account.
@@ -129,11 +129,11 @@ Requests from unrelated software using the key are invisible to this app, so
 provider throttling remains authoritative. Repeated service failures should stop
 with an actionable message, leaving unattempted rows unchecked.
 
-For scale, 40,000 unchecked names require roughly 800 full batches. Six-second
-spacing gives about 80 minutes before additional latency, retries, or throttling.
-Display a range and refine it using observed progress; do not promise that timing.
-The current 3.1-second short-run pacing is insufficient for a sustained scan under
-the hourly limit.
+For scale, 40,000 unchecked names require roughly 800 full batches. With unused
+quotas, minute-paced requests followed by the required hourly wait give a planning
+baseline of about 66 minutes. Latency, retries, and existing usage add time; do not
+promise that timing. A persistent rolling limiter, rather than a fixed delay alone,
+enforces all three windows. The UI shows elapsed time and the current quota wait.
 
 ## Implementation shape
 
@@ -168,3 +168,26 @@ the hourly limit.
    builds and other checkers cannot overwrite active writes.
 9. A small mocked integration scan verifies the full Start → Cancel → Start flow.
    A bounded live check can follow; do not launch the entire catalog during setup.
+
+## Implementation notes
+
+- `scan.py` repeatedly queries unchecked rows without OFFSET or a resume cursor.
+  It saves successes immediately, keeps unresolved retries in memory, and leaves
+  unanswered cancellation work unchecked. A partial index makes the next-batch
+  query efficient as known results accumulate.
+- `rate_limit.py` reserves request slots atomically in an app-level SQLite ledger
+  shared by both checking modes and all catalogs for the configured account. It
+  persists provider cooldowns and applies 40/minute, 560/hour, and 6,400/day.
+- The website adds a separate full-scan preview/start action and reuses the
+  supervisor's cancel control. Progress stays bounded in memory; result rows
+  remain the only domain checkpoint. No background scan starts automatically.
+- Unit tests cover Stop → Start ordering, terminal unknown exclusion, partial
+  responses, failed saves, real process cancellation, quota windows, concurrent
+  reservations, and cooldown persistence.
+- The scan-preview regression was an HTML 404 from an old running backend. The
+  backend now returns JSON API errors and the shared browser API helper handles
+  non-JSON failures explicitly. JavaScript tests reproduce that exact failure,
+  plus malformed success bodies, aborts, and structured errors.
+
+Run `uv run python -m unittest` and `node --test test_web_api.mjs` for the regression
+suites. The real catalog is not used for synthetic scan tests.

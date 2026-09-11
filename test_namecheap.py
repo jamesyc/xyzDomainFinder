@@ -59,7 +59,8 @@ class NamecheapTests(unittest.TestCase):
             return io.BytesIO(item)
 
         def factory(max_requests, deadline):
-            client=namecheap.Client(max_requests,deadline)
+            ledger=Mock(reserve=Mock(return_value=(0, None)))
+            client=namecheap.Client(max_requests,deadline,ledger=ledger)
             client.opener=Mock(open=Mock(side_effect=send))
             return client
 

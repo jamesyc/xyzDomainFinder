@@ -36,6 +36,7 @@ CREATE TABLE domains (
 CREATE UNIQUE INDEX domains_length_rank ON domains(length,rank);
 CREATE INDEX domains_length_score ON domains(length,score DESC,rank);
 CREATE INDEX domains_score ON domains(score DESC,length,rank);
+CREATE INDEX domains_unchecked_score ON domains(score DESC,length,rank) WHERE availability='unchecked';
 '''
 
 
@@ -92,6 +93,7 @@ def ensure_observation_schema(path):
                 if column not in columns:
                     connection.execute(f'ALTER TABLE domains ADD COLUMN {column} {kind}')
             connection.execute("UPDATE metadata SET value='3' WHERE key='schema_version'")
+            connection.execute("CREATE INDEX IF NOT EXISTS domains_unchecked_score ON domains(score DESC,length,rank) WHERE availability='unchecked'")
 
 
 def save_observations(path, observations):
@@ -129,6 +131,15 @@ def check_selection(path, filters, limit, domains=None):
         order = {domain: index for index, domain in enumerate(domains)}
         rows.sort(key=lambda row: order[row['domain']])
     return rows[:limit]
+
+
+def unchecked_info(path):
+    with closing(open_catalog(path)) as connection:
+        counts = dict(connection.execute("SELECT length,COUNT(*) FROM domains WHERE availability='unchecked' GROUP BY length"))
+        connection.row_factory = sqlite3.Row
+        examples = [dict(row) for row in connection.execute(
+            "SELECT domain,score,length FROM domains WHERE availability='unchecked' ORDER BY score DESC,length,rank LIMIT 10")]
+    return {'total': sum(counts.values()), 'by_length': counts, 'examples': examples}
 
 
 def _build(path, rows, selection, stats, replace=False):

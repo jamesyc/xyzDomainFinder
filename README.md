@@ -36,6 +36,51 @@ The viewer binds to localhost. It permits one selected check at a time, with up
 to 50 live names, 20 HTTP attempts, and 60 seconds. A preview is required and is
 valid for five minutes; it cannot be reused to start a duplicate check. Stopping
 the server normally stops its active checker; saved observations remain available.
+
+## Scan all unchecked names
+
+Choose **Scan all unchecked** to review the count and rate policy, then **Start
+scan**. This covers the whole retained catalog, independent of table filters.
+Only rows marked `unchecked` are queried, highest score first; available,
+unavailable, and unknown rows are skipped even when their observations are old.
+
+Results are committed after each response. **Cancel scan** stops further batches;
+an in-flight request may finish and save its results. Unanswered cancelled work
+remains unchecked. Click **Start scan** later to run the same query over what is
+left—there is no resume cursor or job database.
+
+The progress panel shows remaining names, results, current score/length, requests,
+elapsed time, and rate waits. Closing the browser does not stop the local server's
+worker. Keep the server and computer running; normal server shutdown stops the
+worker. After restarting the server, start explicitly to continue.
+
+```sh
+uv run xyz.py scan --preview
+uv run xyz.py scan
+# Optional limits for a short run:
+uv run xyz.py scan --max-checks 50 --max-requests 3 --timeout 60
+```
+
+Both selected checks and full scans use **80% of Namecheap's published limits**:
+40 requests/minute, 560/hour, and 6,400/day, with at least 1.5 seconds between
+starts and at most 50 domains per batch. The worker can use the minute allowance
+and then wait for hourly/daily capacity. `Retry-After` waits also survive restarts.
+See the [Namecheap API FAQ](https://www.namecheap.com/support/knowledgebase/article.aspx/9739/63/api-faq/).
+
+Request reservations are shared across catalogs in a small account-scoped local
+SQLite ledger. On macOS it lives at
+`~/Library/Application Support/xyzDomainFinder/namecheap-requests.sqlite3`;
+other platforms use the user's state directory. It stores hashed account
+identifiers and request times, not API keys or domain progress. Other tools' key
+usage is not visible, so provider throttling remains authoritative.
+
+For 40,000 unchecked names, roughly 800 full batches have a planning baseline of
+about 66 minutes with unused quotas. Latency, retries, and existing account usage
+add time. Hourly/daily waits are expected and remain cancellable. Short selected
+checks retain their time budget and may stop when a required rate wait is too long.
+
+After updating Python server code, restart `uv run xyz.py serve` and reload the
+page. **Refresh data** rereads SQLite; it does not reload the Python backend.
 Use `--database PATH` with `build`, `find`, or `serve` for another catalog, and
 `--port PORT` with `serve` for another port. If mise is not active in your shell,
 prefix `uv run` commands with `mise exec --`.

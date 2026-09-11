@@ -1,6 +1,7 @@
 """One bounded CLI check at a time, supervised by the local website."""
 
 import csv
+import json
 import os
 import re
 import signal
@@ -13,6 +14,7 @@ from pathlib import Path
 
 import catalog
 import namecheap
+import rate_limit
 
 
 class Conflict(ValueError):
@@ -45,7 +47,7 @@ class CheckManager:
             raise ValueError('Some selected names are no longer in the catalog')
         configured = all(os.getenv(key, '').strip() for key in
                          ('NAMECHEAP_USERNAME', 'NAMECHEAP_API_KEY', 'NAMECHEAP_CLIENT_IP'))
-        plan = {'id': uuid.uuid4().hex, 'domains': domains, 'refresh': refresh,
+        plan = {'id': uuid.uuid4().hex, 'mode': 'selected', 'domains': domains, 'refresh': refresh,
                 'target': len(domains), 'max_checks': len(domains), 'max_requests': 20,
                 'timeout': 60, 'cached': sum(not refresh and namecheap.fresh(row, 15) for row in rows),
                 'configured': configured,
@@ -54,30 +56,54 @@ class CheckManager:
             self.plan = (plan, time.monotonic() + 300)
         return plan
 
-    def start(self, plan_id):
+    def preview_scan(self, payload):
+        if not isinstance(payload, dict) or payload:
+            raise ValueError('The unchecked scan does not accept a filtered domain list')
+        info = catalog.unchecked_info(self.database)
+        plan = {'id': uuid.uuid4().hex, 'mode': 'scan', 'selected': info['total'],
+                'by_length': info['by_length'], 'names': info['examples'],
+                'estimated_seconds': rate_limit.estimate_seconds((info['total'] + 49) // 50),
+                'request_limits': dict(rate_limit.LIMITS),
+                'configured': all(os.getenv(key, '').strip() for key in
+                                 ('NAMECHEAP_USERNAME', 'NAMECHEAP_API_KEY', 'NAMECHEAP_CLIENT_IP'))}
+        with self.lock:
+            self.plan = (plan, time.monotonic() + 300)
+        return plan
+
+    def start(self, plan_id, expected_mode='selected'):
         with self.lock:
             if self.job and self.job['state'] in ('running', 'cancelling'):
                 raise Conflict('A check is already running')
             if not self.plan or self.plan[0]['id'] != plan_id or time.monotonic() >= self.plan[1]:
                 raise Conflict('This preview expired. Review the selection again.')
             plan = self.plan[0]
-            catalog.check_selection(self.database, {}, len(plan['domains']), plan['domains'])
-            command = [sys.executable, '-u', str(Path(__file__).with_name('xyz.py')), 'check',
+            if plan['mode'] != expected_mode:
+                raise Conflict('Review the correct check mode before starting')
+            if plan['mode'] == 'scan':
+                selected = catalog.unchecked_info(self.database)['total']
+                if not selected:
+                    raise Conflict('There are no unchecked names left')
+                command = [sys.executable, '-u', str(Path(__file__).with_name('xyz.py')), 'scan',
+                           '--database', str(self.database)]
+            else:
+                selected = len(plan['domains'])
+                catalog.check_selection(self.database, {}, selected, plan['domains'])
+                command = [sys.executable, '-u', str(Path(__file__).with_name('xyz.py')), 'check',
                        '--database', str(self.database), '--limit', str(len(plan['domains'])),
                        '--min-score', '0',
                        '--max-checks', str(plan['max_checks']), '--max-requests', str(plan['max_requests']),
                        '--timeout', str(plan['timeout']), '--target', str(plan['target'])]
-            for domain in plan['domains']:
-                command.extend(['--number', domain])
-            if plan['refresh']:
-                command.append('--refresh')
+                for domain in plan['domains']:
+                    command.extend(['--number', domain])
+                if plan['refresh']:
+                    command.append('--refresh')
             process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                        text=True, encoding='utf-8', cwd=Path(__file__).parent,
                                        start_new_session=True)
             self.process = process
-            self.job = {'id': uuid.uuid4().hex, 'state': 'running', 'selected': len(plan['domains']),
+            self.job = {'id': uuid.uuid4().hex, 'mode': plan['mode'], 'started_at': time.time(), 'state': 'running', 'selected': selected,
                         'completed': 0, 'available': 0, 'unavailable': 0, 'unknown': 0, 'cached': 0,
-                        'exit_code': None, 'diagnostic': '', 'results': [], 'cancel_requested': False}
+                        'exit_code': None, 'diagnostic': '', 'results': [], 'progress': {}, 'cancel_requested': False}
             self.plan = None
             job_id = self.job['id']
             self.worker = threading.Thread(target=self._watch, args=(process, job_id), daemon=True)
@@ -85,7 +111,7 @@ class CheckManager:
             return self._snapshot()
 
     def _snapshot(self):
-        return {**self.job, 'results': list(self.job['results'])} if self.job else None
+        return {**self.job, 'results': list(self.job['results']), 'progress': dict(self.job['progress'])} if self.job else None
 
     def status(self):
         with self.lock:
@@ -99,7 +125,15 @@ class CheckManager:
                     line = line.replace(key, '[redacted]')
                 with self.lock:
                     if self.job['id'] == job_id:
-                        self.job['diagnostic'] = (self.job['diagnostic'] + line)[-5000:]
+                        if line.startswith('SCAN_PROGRESS '):
+                            try:
+                                progress = json.loads(line[len('SCAN_PROGRESS '):])
+                                self.job['progress'] = progress
+                                self.job['selected'] = progress['total']
+                            except (ValueError, KeyError):
+                                pass
+                        else:
+                            self.job['diagnostic'] = (self.job['diagnostic'] + line)[-5000:]
 
         errors = threading.Thread(target=read_errors, daemon=True)
         errors.start()
@@ -114,6 +148,7 @@ class CheckManager:
                     self.job['cached'] += row.get('cached') == 'True'
                     self.job['results'].append({'domain': row['domain'], 'availability': state,
                                                 'cached': row.get('cached') == 'True'})
+                    del self.job['results'][:-50]
         finally:
             code = process.wait()
             errors.join()
@@ -143,7 +178,7 @@ class CheckManager:
                 process.send_signal(signal.SIGINT)
         if active:
             try:
-                process.wait(timeout=5)
+                process.wait(timeout=12 if self.job['mode'] == 'scan' else 5)
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait()
