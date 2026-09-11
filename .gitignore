@@ -8,6 +8,7 @@ mise.local.toml
 *.db
 *.db-*
 *.sqlite*
+!/backups/domains.sqlite3
 .catalog-*
 *.csv
 shortlist*.txt

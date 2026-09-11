@@ -164,13 +164,49 @@ permits supplied numbers with no recognized scoring property.
 `domains.sqlite3` stores only retained names, with score, rank-in-length, property
 explanations, and nullable registrar observations. Build metadata records the
 scoring version/profile, selection settings, and per-length counts and cutoffs.
-The database and exports stay local and are ignored by Git.
+The live database and exports stay local and are ignored by Git. A consistent
+snapshot is committed at [`backups/domains.sqlite3`](backups/domains.sqlite3),
+including retained names, scores, and saved registrar observations.
 
 A build does not overwrite a different selection without `--replace`. Replacement
 publishes a completed SQLite file atomically, preserving recorded observations
 for names that remain and dropping names outside the new selection. It also
 migrates the earlier unscored catalog. Use a separate database path to retain
 multiple collections. Interrupted builds leave the previous catalog intact.
+
+### Back up and restore
+
+Refresh the committed snapshot with SQLite's backup API. This works while a scan
+is running and captures committed results consistently:
+
+```sh
+mise exec -- uv run python - <<'PY'
+import sqlite3
+from contextlib import closing
+
+with closing(sqlite3.connect('file:domains.sqlite3?mode=ro', uri=True)) as source:
+    with closing(sqlite3.connect('backups/domains.sqlite3')) as backup:
+        source.backup(backup)
+        assert backup.execute('PRAGMA integrity_check').fetchone() == ('ok',)
+PY
+git add backups/domains.sqlite3
+git commit -m "Update catalog snapshot"
+git push
+```
+
+The snapshot reflects its last backup; new scan results are protected remotely
+only after refreshing, committing, and pushing it. Credentials and the local
+request-rate ledger are excluded.
+
+On a fresh checkout, restore the snapshot instead of building a new catalog:
+
+```sh
+cp -n backups/domains.sqlite3 domains.sqlite3
+mise exec -- uv run xyz.py serve
+```
+
+`cp -n` preserves an existing live database. To replace one deliberately, stop
+the server and checks first, and move the existing database aside before restoring.
 
 ## Why numeric .xyz domains?
 
