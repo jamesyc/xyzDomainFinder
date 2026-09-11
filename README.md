@@ -1,68 +1,85 @@
 # xyzDomainFinder
 
-## Why 6+ digit numeric .xyz domains are special
+Find interesting numeric `.xyz` domains that you could actually register.
 
-The .xyz registry created the “1.111B Class” of domains covering every 6-,
-7-, 8-, and 9-digit numeric combination from `000000.xyz` through
-`999999999.xyz`. Members of this class are permanently priced at
-$0.99 USD for the first year, making long numeric .xyz names an inexpensive
-way to claim memorable numbers like phone numbers, dates, or ZIP codes for
-experiments and campaigns.
+The useful result is a short list of memorable, meaningful, affordable names.
+xyzDomainFinder starts with your preferences, generates matching numbers locally,
+and ranks them before any availability checks. Network work is reserved for names
+you might want to buy.
 
-## Finding available numeric .xyz domains
+## Why numeric .xyz domains?
 
-Use the asynchronous scanner in `scripts/xyz_domain_checker.py` to test each
-6- or 7-digit numeric combination via the CentralNic RDAP service (or an
-optional DNS-over-HTTPS mode). Results
-are appended to `available_domains.csv`, and progress is persisted in
-`resume_state.json` so a scan can be restarted without losing work. The
-current dataset focuses on 6-digit names (`000000.xyz` through `999999.xyz`).
+The `.xyz` registry's **1.111B Class** covers every six-, seven-, eight-, and
+nine-digit numeric combination, from `000000.xyz` through `999999999.xyz`.
+Leading zeros are part of the name: `001234.xyz` and `1234.xyz` are different
+domains, and the latter is outside this class.
 
-### Quick start
+The class was introduced with advertised pricing of **US$0.99 per year**, making
+numeric names attractive for experiments, personal projects, memorable dates,
+numeric identifiers, and campaigns. That historical price is context, not a
+quote: check the registrar's actual registration and renewal prices, currency,
+fees, and any special pricing before choosing a name.
 
-1. Install dependencies (requires Python 3.12+):
-   ```bash
-   pip install -r requirements.txt
-   ```
-   If you do not have a `requirements.txt`, install `aiohttp` manually.
-2. Run a fresh 6-digit scan. CentralNic currently enforces long (5 minute)
-   back-off windows when more than a handful of RDAP lookups are made in a
-   short period, so start with a conservative rate cap that keeps traffic below
-   50 queries per hour:
-   ```bash
-   python scripts/xyz_domain_checker.py --restart --length 6 --rate-limit 0.01
-   ```
-   At that speed a full pass takes days, but the run is resumable and prevents
-   repeated 429/Retry-After responses. If you have direct permission from the
-   registry or are running from an allow-listed network you can raise the rate.
-3. Resume after an interruption:
-   ```bash
-   python scripts/xyz_domain_checker.py
-   ```
+See the registry's [numeric-domain browser](https://gen.xyz/number),
+[pricing page](https://gen.xyz/pricing), and the
+[2017 announcement](https://news.gandi.net/en/2017/06/introducing-the-1-111b-class-of-xyz-domains/).
+For an occasional purchase, the registry browser and a registrar's bulk search
+may be all you need. This project's value is in expressing your own preferences
+and producing a useful shortlist repeatedly.
 
-### Useful options
+## From an idea to a shortlist
 
-- `--max-count N` – limit the total number of domains processed (helpful for
-  quick tests).
-- `--length 6` / `--length 7` – restrict the scan to one digit length.
-- `--batch-size` / `--concurrency` – tune request throughput.
-- `--resume-file` / `--output` – change where checkpoints and CSV results are
-  written.
-- `--rate-limit` – cap requests per second to avoid RDAP throttling (helpful
-  when running unattended).
-- `--lookup-mode {rdap,doh}` – choose between RDAP (default) and the
-  Cloudflare DNS-over-HTTPS resolver for availability checks. The DoH mode is
-  useful for quicker local experiments when RDAP throttling is too strict.
-- `--doh-endpoint URL` – override the DNS-over-HTTPS endpoint used when in DoH
-  mode (defaults to Cloudflare; compatible with providers like dns.google).
+1. **Describe what interests you.** Choose lengths and patterns, supply meaningful
+   numbers, or narrow the search with a prefix or suffix.
+2. **Generate and rank locally.** Repeated blocks, palindromes, sequences, and
+   explicitly selected dates provide a manageable candidate pool. Each result
+   includes the reason it matches. Ranking expresses your preferences; it is
+   not an appraisal of resale value.
+3. **Review a small list.** Export names for a registrar's bulk search. Candidate
+   generation needs no account, API credentials, or network access.
+4. **Verify the names you like.** Check registration availability and prices
+   through the registrar where you intend to purchase. Automated checks should
+   have explicit limits on names, requests, and elapsed time.
+5. **Choose and register at the registrar.** Recheck the selected name and its
+   renewal terms before checkout. Discovery does not reserve or purchase a name.
 
-Every run appends available domains to the CSV in the format:
+For example, `123123.xyz` repeats a block, `123321.xyz` is a palindrome, and
+`20260911.xyz` encodes a date. These illustrate patterns, not availability.
 
-```text
-domain,length
-000001.xyz,6
-```
+## What an availability result means
 
-The script retries transient errors, respects proxy settings via
-`trust_env=True`, honours RDAP `Retry-After` headers, and saves progress
-regularly so partial results are not lost during long scans.
+A generated candidate is **unchecked**. A registrar can report it as available
+or unavailable at a particular time. Failed requests, throttling, and incomplete
+responses mean **unknown**. An unknown renewal price is not zero.
+
+DNS and registration are different systems. A registered domain can have no DNS
+delegation, so `NXDOMAIN` does not prove that it can be registered. RDAP supplies
+registration data; a missing record or status field is not a registrar's offer
+to sell a name. Registrar verification supplies the practical answer, subject to
+changes before checkout. See [ICANN's DNS rules](https://itp.cdn.icann.org/en/files/registry-agreements/net/net-agmt-html-01jul17-en.htm)
+and the [RDAP response specification](https://www.rfc-editor.org/rfc/rfc9083.html).
+
+Saved checks need a source and timestamp. Their purpose is to avoid repeating
+recent work; they cannot guarantee future availability. Network checks must
+respect provider rate limits and `Retry-After`, retain completed work across
+interruptions, and keep errors distinct from genuine negative results.
+
+## Python tooling
+
+The project targets **Python 3.14**, with **mise** selecting the interpreter and
+providing **uv**. uv owns project dependencies, the lockfile, and the `.venv`
+environment. Project commands run through `uv run` with the mise-selected Python.
+See [mise's Python and uv integration](https://mise.jdx.dev/lang/python.html#mise-uv)
+and [uv's project documentation](https://docs.astral.sh/uv/guides/projects/).
+
+## Earlier scanner
+
+The [backup branch](https://github.com/jamesyc/xyzDomainFinder/tree/backup)
+preserves the original exhaustive six- and seven-digit scanner, its README,
+`available_domains.csv`, and `resume_state.json`. It used CentralNic RDAP or
+DNS-over-HTTPS, with retries, throttling controls, and saved progress.
+
+Those results are historical observations from the old lookup rules. They are
+not a current availability list or a restriction on which names to consider.
+The new approach measures useful choices found for the effort spent checking
+them, rather than coverage of the entire numeric namespace.
