@@ -1,20 +1,20 @@
 # Scored numeric-domain discovery plan
 
-## Outcome
+## Outcome and latest scope
 
-Build one local SQLite catalog containing the **10,000 highest-scoring domains
-for each of 6, 7, 8, and 9 digits**: 40,000 rows in the default build.
-Each row carries an integer score, its rank within that length, and the properties
-that explain its score. The website exposes all four lengths and the breakdown.
+Implemented a scored collection across 6, 7, 8, and 9 digits. The default retains
+up to 10,000 names per length, but this is a configurable browsing/verification
+budget, not a quota or an exact full-namespace top-K claim. A minimum score,
+selected patterns, or an explicit candidate-work budget can produce fewer rows.
 
-This is a plan for the next implementation. The current website reads a
-1,000-row six-digit catalog because that was the previous build default. It has
-pattern reasons and an ordinal rank, but no additive scoring system. This plan
-replaces the family-round-robin ranking and single global retention limit.
-The current database remains untouched during planning.
+Every stored row includes integer score, rank within its length, and explainable
+properties. The website offers length cohorts, minimum-score/property filters,
+and a complete point breakdown. Collection and browsing remain offline;
+Namecheap verification is deferred until the user chooses what to check.
 
-All scoring and catalog construction remain offline. Namecheap verification is a
-later action on selected candidates, not part of this catalog build.
+The user's latest clarification supersedes the exactness proof and exhaustive
+six-digit oracle proposed below in earlier revisions. We prioritize a broad,
+useful candidate collection and correct scoring, retention, and filtering.
 
 ## Brainstorm: what makes a number interesting?
 
@@ -54,8 +54,8 @@ including weaker matches that earned no additional points.
 score = structure + progression + simplicity + roundness + meaning
 ```
 
-The initial weights below are an explicit preference hypothesis. Review examples
-before freezing v1. They are not a measure of availability, price, or resale value.
+The v1 weights below are explicit preferences. The constant bonus was increased
+from 35 to 55 after the first build excluded recognized constants at longer lengths. They are not a measure of availability, price, or resale value.
 Do not normalize every length's observed maximum to 100: that would make scores
 shift when the candidate pool changes.
 
@@ -108,9 +108,9 @@ Award 25 for a trailing run of zeros covering at least
 The all-zero label does not receive a separate roundness bonus.
 Leading zeros remain valid and receive no blanket penalty.
 
-### Meaning: strongest match, up to 35 points
+### Meaning: strongest match, up to 55 points
 
-- **Recognized constant, +35:** use the first N digits including the integer part,
+- **Recognized constant, +55:** use the first N digits including the integer part,
   with the decimal point removed. Initial constants: pi, e, and the golden ratio,
   with reviewed literal digit strings for N = 6–9. Store the constant's name and
   the exact source string in the versioned scoring profile.
@@ -151,11 +151,40 @@ Example for `888888.xyz`:
   "domain": "888888.xyz",
   "length": 6,
   "score": 80,
+  "reasons": "uniform;digit_diversity;pair;palindrome",
   "properties": [
-    {"id": "uniform", "family": "structure", "points": 60, "awarded": 60, "evidence": {"digit": "8", "count": 6}},
-    {"id": "palindrome", "family": "structure", "points": 35, "awarded": 0, "evidence": {"mirror": "888888"}},
-    {"id": "paired_digits", "family": "structure", "points": 30, "awarded": 0, "evidence": {"blocks": ["88", "88", "88"]}},
-    {"id": "digit_diversity", "family": "simplicity", "points": 20, "awarded": 20, "evidence": {"digits": ["8"]}}
+    {
+      "id": "uniform",
+      "family": "structure",
+      "title": "Uniform digits",
+      "points": 60,
+      "awarded": 60,
+      "evidence": "8 repeated 6 times"
+    },
+    {
+      "id": "digit_diversity",
+      "family": "simplicity",
+      "title": "Few distinct digits",
+      "points": 20,
+      "awarded": 20,
+      "evidence": "8"
+    },
+    {
+      "id": "pair",
+      "family": "structure",
+      "title": "Paired digits",
+      "points": 30,
+      "awarded": 0,
+      "evidence": "88 / 88 / 88"
+    },
+    {
+      "id": "palindrome",
+      "family": "structure",
+      "title": "Palindrome",
+      "points": 35,
+      "awarded": 0,
+      "evidence": "888888 reads the same in reverse"
+    }
   ]
 }
 ```
@@ -164,96 +193,34 @@ Sum of `awarded` must equal `score`. A weaker property remains discoverable by
 filters even when a stronger match consumed that family's award. Break equal
 rule awards within a family by a fixed rule-ID ordering.
 
-## Finding the actual top 10,000 efficiently
+## Practical candidate collection
 
-### Exactness contract
+`candidates.py` constructs repeats, palindromes, pairs, chunks, full and dominant
+sequences, counting blocks, near repeats, long zero endings, dates, and constants.
+It processes a length at a time and uses a bounded heap to retain the strongest
+observed candidates. A label always receives the same score regardless of which
+constructor emitted it. Heap ties use lexical label order within a length.
 
-The default build must find the true top 10,000 **under this scoring profile**
-for each supported length. A small arbitrary sample or the old 250,000-generation
-cap cannot establish that claim. Remove that cap from exact builds.
+Uniform and one-/two-/three-digit-alphabet generators provide compact-digit
+fallbacks for sparse collections. A fallback is skipped when the retained cutoff
+already exceeds its standalone simplicity award. This keeps work focused on
+structured names; the result is explicitly recorded as a curated, generated
+pool rather than a proof that every possible numeric label was ranked.
 
-We can avoid enumerating every label if every positive-scoring rule has a
-complete constructor. Let C be the union of those constructors' outputs:
+Only retained heap labels need a deduplication set. With fixed scores and a
+monotonically improving cutoff, a rejected/evicted duplicate cannot later beat
+the cutoff. Full property explanations are allocated for winners after selection;
+the faster scoring path returns just the integer total. Tests compare both paths.
 
-1. Every label with a positive score must appear in C.
-2. Labels outside C have score zero by definition of this profile.
-3. If C contains at least 10,000 distinct positive-scoring labels, the top 10,000
-   of C are also the top 10,000 of the full namespace, including tie-breaking.
+The default has no arbitrary construction cap. `--max-generated` is an optional
+per-length work budget, recorded in metadata with a visible warning when reached.
+The actual retained count and cutoff are reported per length; never pad a sparse
+collection with zero-score arbitrary names. `--min-score 0` is available when
+explicit supplied numbers without recognized traits should still be retained.
 
-This is a coverage obligation to test, not an assumption that “patterns look
-representative.” A future scoring rule may only join exact mode when its
-constructor or another coverage argument is available.
-
-### Constructor coverage
-
-| Positive rules covered | Constructor |
-| --- | --- |
-| Digit diversity; uniform; repeated-digit chunks | Enumerate labels over each digit subset of size 1–3; yield a label only for its exact distinct-digit set |
-| Repeating blocks | Enumerate base blocks whose width divides N and repeat them to length N |
-| Palindromes | Enumerate and mirror the first `ceil(N / 2)` digits |
-| Paired digits; stepping pairs | Enumerate the N/2 collapsed digits and double each one, for even N |
-| Whole/dominant sequences | Place every qualifying ascending/descending run at every possible position and enumerate the remaining free digits |
-| Counting blocks | Enumerate starts for 2-/3-digit blocks, directions, and all lengths with at least three blocks; reject overflow |
-| Near repetition | Mutate exactly one position of each allowed uniform/repeating seed |
-| Roundness | Enumerate the short prefix and append a qualifying zero tail; require a nonzero prefix digit |
-| Dates/constants | Enumerate the finite configured calendar ranges and curated constants |
-
-For example, the <=3-distinct-digit constructor produces 67,600 unique six-digit
-labels and 2,200,960 unique nine-digit labels. That alone guarantees enough
-positive-scoring candidates for the default 10,000-per-length target. Other
-constructors add high-scoring names outside those small digit alphabets.
-
-This is larger than today's tiny pool, but far smaller than one billion
-nine-digit labels. It requires real benchmarking; do not promise a subsecond
-full build. Generator overlaps are expected, and no match may be missed because
-one generator happened to run first.
-
-### Selection and memory
-
-- Process one length at a time, with a size-10,000 heap holding the best candidates.
-- Order by **score descending, then label ascending** within each length. Labels
-  remain zero-padded strings. Equal scores must not depend on generator order.
-- Deduplicate labels currently retained in the heap. Rejected/evicted duplicates
-  do not need a global set: with a deterministic score and a monotonically
-  improving threshold, they cannot later beat the heap cutoff.
-- Store compact heap records; generate full property explanations for final
-  winners after selection, using the same scorer.
-- Avoid keeping millions of scored objects or rejected rows in memory or SQLite.
-- Record raw emissions/scoring work honestly; overlapping constructors mean raw
-  emissions are not a unique-candidate count.
-- Emit per-length progress, elapsed time, and the current cutoff to stderr.
-
-An interrupted or explicitly budget-limited run must not replace an exact catalog
-with partial results. An optional future approximate preview would need an
-explicit label and separate metadata; it is not the default build.
-
-## Calibration and performance before the full build
-
-Start with a pure, easy-to-review scorer and a table of expected examples.
-Keep weights in one small Python profile, not a plugin system or arbitrary code
-configuration. Store its version and resolved constants/ranges with the build.
-
-Benchmark a representative sample of scorer calls and constructor output,
-including nine-digit labels, before estimating runtime. If profiling shows that
-scoring rejected labels dominates, compute shared primitives once (digit counts,
-runs, minimal period, symmetry), short-circuit impossible matches, and delay
-explanation allocations until after selection. Near repetition must not compare
-each label with thousands of seeds: for an eligible block width, group positions
-by their offset within the block. The minimum substitutions needed are the label
-length minus the sum of each group's most frequent digit count. A distance of
-exactly one establishes this rule in a small amount of work per width.
-
-Validate exact selection against an exhaustive oracle over all 1,000,000
-six-digit labels. This is a bounded development verification task, not a return
-to million-row persistent catalogs or million-request network scans. Compare
-both the positive-scoring set coverage and the ordered top 10,000. Also use
-smaller synthetic universes to exercise edge cases and ties cheaply.
-
-For seven through nine digits, test coverage of each rule with independently
-constructed examples, mutation cases, and sampled labels. The exactness argument
-comes from complete rule constructors; sampling is supplementary evidence.
-Use the built-in standard library first. Add multiprocessing only if measurements
-show the full build is too slow; lengths are naturally independent work units.
+There is no complete namespace table, random sample presented as exact, or
+background queue of rejected names. Broader future coverage can be added through
+concrete constructors without changing the storage or query model.
 
 ## SQLite changes
 
@@ -268,13 +235,13 @@ version. Add:
 - `rank`: now rank **within a digit length**, not across the whole database.
 
 Replace the global unique rank index with `UNIQUE(length, rank)`. Add an index
-on `(length, score DESC, label)` for ranked length views. Revisit a mixed-score
-index only if actual all-length query performance warrants it.
+on `(length, score DESC, label)` for ranked length views. A mixed-score index
+supports the default all-length website query without sorting the entire catalog.
 
 Build metadata includes schema/scoring versions, resolved profile, default
-lengths `[6,7,8,9]`, `keep_per_length=10000`, exactness/coverage method, build time,
+lengths `[6,7,8,9]`, `keep_per_length=10000`, candidate coverage method, build time,
 and per-length row count, raw candidate work, elapsed time, and cutoff score.
-A total of 40,000 rows must not conceal a missing length or an unbalanced split.
+The total row count must not conceal which lengths were built or their individual counts.
 
 Publish a new database atomically only after all requested lengths finish and
 validation passes. Use the current safe temporary-file workflow. Support the
@@ -315,17 +282,17 @@ filters. Exports include length, score, rank-in-length, properties, and existing
 availability/price fields. Ranks are recomputed when weights change; scores and
 rank positions are separate concepts.
 
-Keep `generate` for transient experimentation, but make its ordering use the same
-scorer. A filtered or explicitly capped preview is described as such and must not
-silently replace the exact default catalog.
+Keep `generate` for transient experimentation with the same scorer. A filtered
+or explicitly capped preview is described as such. Replacing a different existing
+catalog requires the explicit `--replace` option.
 
 ## Website changes
 
 The broader catalog needs more than adding three options to the existing selector:
 
 - Show **All / 6 digits / 7 digits / 8 digits / 9 digits**, with actual counts.
-- Show total saved domains and per-length coverage. Default completed state is
-  40,000 total and 10,000 in each cohort.
+- Show total saved domains and per-length coverage. A full default build can retain
+  40,000 total; display actual counts rather than hardcoding that total.
 - Add a score column; label rank as “Rank in length.” Do not imply a global rank
   when the all-length list contains four separate #1 entries.
 - Default all-length ordering: score descending, then length ascending, then
@@ -347,54 +314,49 @@ use parameterized SQL with an allowlist for sort expressions.
 Reuse the current viewer, HTML/CSS, and local server. No frontend framework,
 cloud deployment, database service, or new website backend is needed.
 
-## Implementation sequence
+## Implementation structure
 
-1. **Scorer and examples:** implement pure property detection, integer family
-   awards, evidence, and `score`; review representative examples from all lengths.
-   Freeze the proposed v1 weights only after that review.
-2. **Covered candidate search:** add complete rule constructors and heap selection;
-   prove six-digit agreement against exhaustive scoring and benchmark larger pools.
-3. **Catalog v2:** add score/properties, per-length ranks, metadata, and migration
-   that preserves retained observations. Build and verify all four 10,000-row cohorts.
-4. **CLI and website:** expose scores, explanations, length cohorts, and server-side
-   filtered pagination/export. Update the README as a reader guide to implemented
-   behavior, without treating planned commands as available today.
-5. **Quality review:** inspect high/middle/cutoff examples for each length, compare
-   property distributions, and confirm results feel worth browsing. If the weights
-   change, bump the scoring version and rebuild deterministically. Specifically
-   check whether recognizable constants survive the cutoff, incidental dates earn
-   too much, or one structural property dominates a length. Adjust transparent
-   weights rather than quietly adding family quotas to a score-sorted top 10,000.
+1. **Scorer:** `scoring.py` holds versioned rules, fixed constants/date ranges,
+   a fast integer scorer, and full property evidence. `score` exposes the breakdown.
+2. **Candidate search:** `candidates.py` holds constructors, source filtering,
+   and per-length heap selection. Score-first ordering replaces round-robin ranking.
+3. **Catalog:** `catalog.py` stores score/properties, independent length ranks,
+   and per-length metadata. Atomic rebuild migrates old observations for retained names.
+4. **CLI and website:** `xyz.py` exposes collection and filters; `viewer.py` shares
+   database query code for bounded pages, single-domain details, and streamed CSV.
+   The existing frontend renders only the page rather than loading 40,000 explanations.
+5. **Calibration:** inspect examples and property distributions. New weights require
+   a scoring-version change and rebuild. Preserve visible reasons rather than
+   adding undisclosed ranking adjustments.
 
 Namecheap remains deferred throughout these steps. Better catalog coverage is
 not authorization to check all 40,000 names online.
 
-## Acceptance criteria
+## Validation and observed results
 
-- Default database has exactly 10,000 unique rows for each supported length and
-  40,000 total, with ranks 1–10,000 independently in each cohort.
-- All stored scores equal the sum of awarded property points. Every matched
-  property has reproducible evidence; shadowed matches do not double-award points.
-- The same profile produces identical scores and ordered winners regardless of
-  generator order. Leading zeros remain intact throughout.
-- Exact six-digit winners match exhaustive scoring, including score ties.
-  Every positive rule has a tested coverage constructor for all supported lengths.
-- Weights, constants, date ranges, schema version, and per-length cutoffs are saved
-  with the catalog. Completed catalogs cannot be silently approximate.
-- Rebuild failure leaves the prior catalog usable; retained registrar observations
-  survive migration. Rejected candidates are never written to the final database.
-- Website counts show all four cohorts. Length/property/score filters, pagination,
-  detail breakdowns, and exports agree with SQLite; initial page load is bounded
-  by page size rather than total catalog size.
-- Runtime and peak memory are measured before setting build-time expectations.
-  No Namecheap request or credential persistence occurs during this work.
+- The default build retained 10,000 unique rows in each of the four lengths.
+  Lower limits and stricter filters are supported; row count is not a quality metric.
+- Worked scores and sampled labels validate that family awards sum to each score
+  and that the fast scorer agrees with detailed explanations. Covered properties
+  remain visible without double-awarding points.
+- Finite-pool tests verify deterministic score/label order and duplicate handling.
+  Date, near-repeat, sequence, validation, and leading-zero cases are covered.
+- Database tests cover multi-length ranks, JSON explanations, filtered queries,
+  same-settings reuse, failed publication rollback, and v1 observation migration.
+- HTTP tests cover pagination, score/length/property filters, detail explanations,
+  full-filter export independent of page size, invalid parameters, and read-only
+  access. No registrar request is made.
+- The first full run considered 463,404 raw candidate emissions across lengths
+  and took approximately 4.4 seconds of candidate selection on this machine.
+  Rejected candidates were not inserted into SQLite. Timings are measurements,
+  not universal performance promises.
 
 ## Scope guardrails
 
 No learned model, resale-price predictor, opaque fractional score, scoring plugin
 framework, full namespace database, random candidate sampling presented as exact,
 or automatic availability crawl. Add personal/cultural scoring only through
-explicit preferences, and add new positive rules only with a coverage strategy.
+explicit preferences, and add new positive rules with explicit construction and test strategies.
 
 Use the existing mise-selected Python 3.14, uv environment, and standard-library
 SQLite/tooling. The original scanner remains preserved on `backup`.

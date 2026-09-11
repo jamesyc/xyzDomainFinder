@@ -1,121 +1,165 @@
-"""Keep a ranked shortlist in SQLite; candidate construction stays in memory."""
+"""Atomic scored catalogs and shared, parameterized browsing queries."""
 
 import json
 import os
 import sqlite3
 import tempfile
+from collections import Counter
 from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
+import scoring
 
-RANKING_VERSION = "pattern-shortlist-v1"
-OBSERVATIONS = ("availability", "checked_at", "provider", "registration_price", "renewal_price", "currency")
-COLUMNS = ("domain", "length", "rank", "reasons", *OBSERVATIONS)
-SCHEMA = """
+RANKING_VERSION = scoring.VERSION
+OBSERVATIONS = ('availability','checked_at','provider','registration_price','renewal_price','currency')
+COLUMNS = ('domain','length','score','rank','reasons',*OBSERVATIONS)
+SCHEMA = '''
 CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE domains (
-    domain TEXT PRIMARY KEY,
-    label TEXT NOT NULL UNIQUE CHECK(label NOT GLOB '*[^0-9]*'),
-    length INTEGER NOT NULL CHECK(length BETWEEN 6 AND 9 AND length = length(label)),
-    rank INTEGER NOT NULL CHECK(rank > 0),
-    reasons TEXT NOT NULL,
-    availability TEXT NOT NULL DEFAULT 'unchecked'
-        CHECK(availability IN ('unchecked', 'available', 'unavailable', 'unknown')),
-    checked_at TEXT,
-    provider TEXT,
-    registration_price TEXT,
-    renewal_price TEXT,
-    currency TEXT,
-    CHECK(domain = label || '.xyz')
+ domain TEXT PRIMARY KEY,
+ label TEXT NOT NULL UNIQUE CHECK(label NOT GLOB '*[^0-9]*'),
+ length INTEGER NOT NULL CHECK(length BETWEEN 6 AND 9 AND length=length(label)),
+ score INTEGER NOT NULL CHECK(score >= 0),
+ rank INTEGER NOT NULL CHECK(rank > 0),
+ reasons TEXT NOT NULL,
+ properties_json TEXT NOT NULL CHECK(json_valid(properties_json)),
+ availability TEXT NOT NULL DEFAULT 'unchecked' CHECK(availability IN ('unchecked','available','unavailable','unknown')),
+ checked_at TEXT, provider TEXT, registration_price TEXT, renewal_price TEXT, currency TEXT,
+ CHECK(domain=label||'.xyz')
 );
-CREATE UNIQUE INDEX domains_rank ON domains(rank);
-"""
+CREATE UNIQUE INDEX domains_length_rank ON domains(length,rank);
+CREATE INDEX domains_length_score ON domains(length,score DESC,label);
+CREATE INDEX domains_score ON domains(score DESC,length,label);
+'''
 
 
-def open_catalog(path):
-    """Open read-only so a mistyped path never creates an empty database."""
-    connection = sqlite3.connect(Path(path).resolve().as_uri() + "?mode=ro", uri=True)
+def open_catalog(path, legacy=False):
+    connection=sqlite3.connect(Path(path).resolve().as_uri()+'?mode=ro',uri=True)
     try:
-        metadata = dict(connection.execute("SELECT key, value FROM metadata"))
-        if metadata.get("ranking_version") != RANKING_VERSION:
-            raise ValueError("Unsupported catalog version; choose a new --database")
-        if int(metadata.get("row_count", -1)) != connection.execute("SELECT COUNT(*) FROM domains").fetchone()[0]:
-            raise ValueError("Incomplete catalog; choose a new --database")
+        metadata=dict(connection.execute('SELECT key,value FROM metadata'))
+        allowed={RANKING_VERSION,'pattern-shortlist-v1'} if legacy else {RANKING_VERSION}
+        if metadata.get('ranking_version') not in allowed:
+            raise ValueError('Catalog uses an older scoring version; run build --replace')
+        if int(metadata.get('row_count',-1)) != connection.execute('SELECT COUNT(*) FROM domains').fetchone()[0]:
+            raise ValueError('Incomplete catalog; rebuild it with --replace')
     except BaseException:
         connection.close()
         raise
     return connection
 
 
-def build(path, ranked, selection, examined, capped, replace=False):
-    """Commit only retained names; publish atomically and preserve retained observations."""
-    path = Path(path)
-    settings = json.dumps(selection, sort_keys=True)
-    retained = {f"{label}.xyz" for label, _ in ranked}
-    observations = {}
-    exists = path.exists()
+def build(path, rows, selection, stats, replace=False):
+    path=Path(path)
+    settings=json.dumps(selection,sort_keys=True)
+    retained={row['domain'] for row in rows}
+    observations={}
+    exists=path.exists()
     if exists:
-        with closing(open_catalog(path)) as connection:
-            metadata = dict(connection.execute("SELECT key, value FROM metadata"))
-            if metadata.get("selection") == settings and not replace:
+        with closing(open_catalog(path,legacy=True)) as connection:
+            metadata=dict(connection.execute('SELECT key,value FROM metadata'))
+            if metadata.get('ranking_version') == RANKING_VERSION and metadata.get('selection') == settings and not replace:
                 return False
             if not replace:
-                raise ValueError("Catalog has different selection settings; use --replace or another --database")
-            for domain, *values in connection.execute("SELECT domain, " + ", ".join(OBSERVATIONS) + " FROM domains"):
+                raise ValueError('Catalog settings/version differ; use --replace or another --database')
+            for domain,*values in connection.execute('SELECT domain,'+','.join(OBSERVATIONS)+' FROM domains'):
                 if domain in retained:
-                    observations[domain] = values
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary = tempfile.mkstemp(prefix=".catalog-", suffix=".sqlite3", dir=path.parent)
+                    observations[domain]=values
+    pattern_counts=Counter(prop['id'] for row in rows for prop in row['properties'])
+    metadata={
+        'ranking_version':RANKING_VERSION,'schema_version':'2','selection':settings,
+        'profile':json.dumps(scoring.PROFILE),'cohorts':json.dumps(stats),
+        'pattern_counts':json.dumps(pattern_counts),'row_count':str(len(rows)),
+        'examined':str(sum(info['examined'] for info in stats.values())),
+        'cap_reached':str(any(info['capped'] for info in stats.values())).lower(),
+        'coverage':'structured candidate pool; no exhaustive namespace claim',
+        'created_at':datetime.now(timezone.utc).isoformat(),
+    }
+    path.parent.mkdir(parents=True,exist_ok=True)
+    descriptor,temporary=tempfile.mkstemp(prefix='.catalog-',suffix='.sqlite3',dir=path.parent)
     os.close(descriptor)
     try:
         with closing(sqlite3.connect(temporary)) as connection:
             connection.executescript(SCHEMA)
             with connection:
-                connection.executemany(
-                    "INSERT INTO domains VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    ((f"{label}.xyz", label, len(label), rank, ";".join(reasons),
-                      *observations.get(f"{label}.xyz", ("unchecked", None, None, None, None, None)))
-                     for rank, (label, reasons) in enumerate(ranked, 1)),
-                )
-                connection.executemany("INSERT INTO metadata VALUES (?, ?)", [
-                    ("ranking_version", RANKING_VERSION), ("selection", settings),
-                    ("row_count", str(len(ranked))), ("examined", str(examined)),
-                    ("cap_reached", str(capped).lower()),
-                    ("created_at", datetime.now(timezone.utc).isoformat()),
-                ])
+                connection.executemany('INSERT INTO domains VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',(
+                    (row['domain'],row['domain'][:-4],row['length'],row['score'],row['rank'],row['reasons'],
+                     json.dumps(row['properties'],separators=(',',':')),
+                     *observations.get(row['domain'],('unchecked',None,None,None,None,None))) for row in rows))
+                connection.executemany('INSERT INTO metadata VALUES (?,?)',metadata.items())
+            connection.execute('PRAGMA optimize')
         if exists:
-            os.replace(temporary, path)
+            os.replace(temporary,path)
         else:
-            # Refuse to overwrite a concurrent build that appeared since the check.
-            os.link(temporary, path)
+            os.link(temporary,path)
     finally:
         Path(temporary).unlink(missing_ok=True)
     return True
 
 
-def find(path, args):
-    clauses, parameters = [], []
-    if args.pattern:
-        patterns = list(dict.fromkeys(args.pattern))
-        clauses.append("(" + " OR ".join("instr(';' || reasons || ';', ?) > 0" for _ in patterns) + ")")
-        parameters.extend(f";{pattern};" for pattern in patterns)
-    for value, clause, parameter in (
-        (args.prefix, "label LIKE ?", f"{args.prefix}%"),
-        (args.suffix, "label LIKE ?", f"%{args.suffix}"),
-        (args.contains, "instr(label, ?) > 0", args.contains),
+def where(filters):
+    clauses,params=[],[]
+    patterns=filters.get('pattern') or []
+    if isinstance(patterns,str): patterns=[patterns]
+    if patterns:
+        clauses.append('('+' OR '.join("instr(';'||reasons||';',?)>0" for _ in patterns)+')')
+        params.extend(';'+pattern+';' for pattern in patterns)
+    lengths=filters.get('length') or []
+    if isinstance(lengths,(int,str)): lengths=[lengths]
+    if lengths:
+        clauses.append('length IN ('+','.join('?' for _ in lengths)+')')
+        params.extend(lengths)
+    for key,clause,transform in (
+        ('search','instr(domain,?)>0',lambda v:v.strip().lower()),
+        ('prefix','label LIKE ?',lambda v:v+'%'),('suffix','label LIKE ?',lambda v:'%'+v),
+        ('contains','instr(label,?)>0',lambda v:v),('state','availability=?',lambda v:v),
     ):
-        if value:
-            clauses.append(clause)
-            parameters.append(parameter)
-    if args.no_leading_zero:
-        clauses.append("label NOT LIKE '0%'")
-    if args.state:
-        clauses.append("availability = ?")
-        parameters.append(args.state)
-    where = " WHERE " + " AND ".join(clauses) if clauses else ""
-    query = "SELECT " + ", ".join(COLUMNS) + " FROM domains" + where + " ORDER BY rank LIMIT ?"
+        if filters.get(key):
+            clauses.append(clause);params.append(transform(filters[key]))
+    if filters.get('no_leading_zero'): clauses.append("label NOT LIKE '0%'")
+    if filters.get('min_score') is not None:
+        clauses.append('score>=?');params.append(filters['min_score'])
+    return (' WHERE '+' AND '.join(clauses) if clauses else ''),params
+
+
+def find(path,args):
+    return page(path,vars(args),args.limit,0)['rows']
+
+
+def page(path,filters,limit=20,offset=0):
+    clause,params=where(filters)
     with closing(open_catalog(path)) as connection:
-        connection.row_factory = sqlite3.Row
-        return [dict(row) for row in connection.execute(query, [*parameters, args.limit])]
+        connection.row_factory=sqlite3.Row
+        total=connection.execute('SELECT COUNT(*) FROM domains'+clause,params).fetchone()[0]
+        rows=[dict(row) for row in connection.execute('SELECT '+','.join(COLUMNS)+' FROM domains'+clause+
+               ' ORDER BY score DESC,length,label LIMIT ? OFFSET ?',[*params,limit,offset])]
+    return {'rows':rows,'total':total}
+
+
+def detail(path,domain):
+    with closing(open_catalog(path)) as connection:
+        connection.row_factory=sqlite3.Row
+        row=connection.execute('SELECT '+','.join(COLUMNS)+',properties_json FROM domains WHERE domain=?',(domain,)).fetchone()
+    if row is None: return None
+    result=dict(row);result['properties']=json.loads(result.pop('properties_json'))
+    return result
+
+
+def summary(path):
+    with closing(open_catalog(path)) as connection:
+        metadata=dict(connection.execute('SELECT key,value FROM metadata'))
+        checked=connection.execute("SELECT COUNT(*) FROM domains WHERE availability!='unchecked'").fetchone()[0]
+    return {'row_count':int(metadata['row_count']),'examined':int(metadata['examined']),
+            'checked':checked,'cohorts':json.loads(metadata['cohorts']),
+            'pattern_counts':json.loads(metadata['pattern_counts']),
+            'ranking_version':metadata['ranking_version'],'created_at':metadata['created_at'],
+            'cap_reached':metadata['cap_reached'],'coverage':metadata['coverage']}
+
+
+def export_rows(path,filters):
+    clause,params=where(filters)
+    with closing(open_catalog(path)) as connection:
+        connection.row_factory=sqlite3.Row
+        for row in connection.execute('SELECT '+','.join(COLUMNS)+',properties_json FROM domains'+clause+
+                                       ' ORDER BY score DESC,length,label',params):
+            yield dict(row)

@@ -1,134 +1,142 @@
 # xyzDomainFinder
 
-Find interesting numeric `.xyz` domains that you could actually register.
+Find interesting numeric `.xyz` domains by scoring them locally, keeping a useful
+collection in SQLite, and exploring it before making any registrar queries.
 
-The useful result is a short list of memorable, meaningful, affordable names.
-xyzDomainFinder starts with your preferences, generates matching numbers locally,
-and saves only the best-ranked candidates in SQLite. Browse that catalog and
-export a shortlist before checking names at your registrar.
+## Build and explore
 
-## Why numeric .xyz domains?
-
-The `.xyz` registry's **1.111B Class** covers every six-, seven-, eight-, and
-nine-digit numeric combination, from `000000.xyz` through `999999999.xyz`.
-Leading zeros are part of the name: `001234.xyz` and `1234.xyz` are different
-domains, and the latter is outside this class.
-
-The class was introduced with advertised pricing of **US$0.99 per year**, making
-numeric names attractive for experiments, personal projects, memorable dates,
-numeric identifiers, and campaigns. That historical price is context, not a
-quote: check the registrar's actual registration and renewal prices, currency,
-fees, and any special pricing before choosing a name.
-
-See the registry's [numeric-domain browser](https://gen.xyz/number),
-[pricing page](https://gen.xyz/pricing), and the
-[2017 announcement](https://news.gandi.net/en/2017/06/introducing-the-1-111b-class-of-xyz-domains/).
-For an occasional purchase, the registry browser and a registrar's bulk search
-may be all you need. This project's value is in expressing your own preferences
-and producing a useful shortlist repeatedly.
-
-## From an idea to a shortlist
-
-1. **Describe what interests you.** Choose lengths and patterns, supply meaningful
-   numbers, or narrow the search with a prefix or suffix.
-2. **Generate and rank locally.** Repeated blocks, palindromes, sequences, paired
-   digits, round numbers, memorable chunks, and explicitly selected dates provide
-   a manageable candidate pool. The shortlist mixes selected pattern families,
-   and each result includes the reason it matches. Ranking expresses your
-   preferences; it is not an appraisal of resale value.
-3. **Keep and review the best candidates.** A build retains up to 1,000 names by
-   default, with their ranks and match reasons in a local SQLite database.
-   Search that catalog or export names for a registrar's bulk search. Building
-   and browsing need no account, API credentials, or network access.
-4. **Verify the names you like.** Check registration availability and prices
-   through the registrar where you intend to purchase. Automated checks should
-   have explicit limits on names, requests, and elapsed time.
-5. **Choose and register at the registrar.** Recheck the selected name and its
-   renewal terms before checkout. Discovery does not reserve or purchase a name.
-
-For example, `123123.xyz` repeats a block, `123321.xyz` is a palindrome, and
-`20260911.xyz` encodes a date. These illustrate patterns, not availability.
-
-## Build and browse
+The project uses **Python 3.14 through mise**, with **uv** managing `.venv` and the
+lockfile. No third-party Python dependencies are required.
 
 ```sh
 mise install
 mise exec -- uv sync
-uv run xyz.py build
-uv run xyz.py find --limit 20
-uv run xyz.py find --pattern palindrome --contains 88
-uv run xyz.py find --prefix 12 --format text > shortlist.txt
+uv run xyz.py build --replace
+uv run xyz.py serve
 ```
 
-For a browser view, run `uv run xyz.py serve` and open
-[the local catalog](http://127.0.0.1:8765). It reads the same SQLite file and lets
-you search digits, filter by pattern, length, or status, inspect a candidate,
-copy names, and export the filtered results. **Refresh data** rereads the catalog
-after a rebuild. The viewer is read-only and makes no registrar requests.
-Use `--database PATH` or `--port PORT` with `serve` to change its defaults.
+Open [the local catalog](http://127.0.0.1:8765). Switch between six-, seven-, eight-,
+and nine-digit collections; search digits; filter by interesting property or
+minimum score; open a name to see every contributing rule. Export downloads all
+matching results, not just the current page. **Refresh data** rereads SQLite.
 
-The default build selects six-digit names and stores at most 1,000 in
-`domains.sqlite3`. Use repeated `--length` and `--pattern` options to choose
-six- through nine-digit names and pattern families. `--keep` sets the number
-retained; `--max-generated` bounds local construction work (250,000 constructions
-by default). A cap warning means the pool may be incomplete; this is also recorded
-in catalog metadata. Generated data stays local and is ignored by Git.
+The viewer binds to localhost and is read-only. It makes no registrar requests.
+Use `--database PATH` with `build`, `find`, or `serve` for another catalog, and
+`--port PORT` with `serve` for another port. If mise is not active in your shell,
+prefix `uv run` commands with `mise exec --`.
+
+## What makes a number interesting?
+
+Each name gets integer points across five families. Only the strongest matching
+rule in each family contributes; independent family awards add together.
+
+| Family | Properties and points |
+| --- | --- |
+| Structure | Uniform digits 60; repeating blocks 45; palindromes 35; pairs 30; repeated-digit chunks or near repetition 20 |
+| Progression | Whole sequences 45; counting blocks 35; stepping pairs 30; dominant consecutive runs earn a length-scaled bonus |
+| Simplicity | One distinct digit 20; two digits 14; three digits 6 |
+| Roundness | A sufficiently long zero ending 25 |
+| Meaning | Recognized mathematical constants 55; a valid date in the configured formats/ranges 12 |
+
+For example, `888888.xyz` gets **80** points: uniform digits (60) and one distinct
+digit (20). Its palindrome and paired-digit matches remain visible, but add no
+extra structure points. `121212.xyz` gets **71**: repetition (45), two digits (14),
+and the date 2012-12-12 (12).
+
+Dates use YYMMDD in 2000–2099 or YYYYMMDD in 1900–2099. No date meaning is inferred
+for seven or nine digits. Constants are pi, e, and the golden ratio, using the
+first N digits with the decimal point removed. Exact definitions, weights, and
+source digits are versioned and saved in the catalog's scoring profile.
+
+Scores express a preference for recognizable structure and meaning. They are
+not resale values, prices, or availability predictions. The site shows matched
+properties even when a stronger rule covers their points.
 
 ```sh
-uv run xyz.py build --length 8 --length 6 --pattern repeat --pattern palindrome --keep 500 --replace
-uv run xyz.py generate --length 9 --pattern palindrome --limit 20 --format csv
+uv run xyz.py score 888888 121212 123456789
+uv run xyz.py find --length 8 --min-score 50 --pattern palindrome --limit 20
+uv run xyz.py generate --length 9 --pattern constant --limit 10 --format json
 ```
 
-`--replace` intentionally replaces the catalog's candidate selection, preserving
-recorded observations for names that remain. Use `--database PATH` to maintain a
-separate catalog instead. Repeating the same build settings reuses the existing
-catalog. The `generate` command prints candidates without changing SQLite.
+## A useful collection, not an exhaustive crawl
 
-Ranking gives explicit numbers first priority, then takes turns across pattern
-families. Within each family it favors requested length order, fewer distinct
-digits, and lexical order. The top-K cutoff is a preference, not a resale-value
-estimate. Arbitrary unrecognized numbers do not fill unused capacity.
+A default build considers all four supported lengths and retains up to **10,000
+names per length**. That is a configurable browsing/checking budget, not a quota
+to fill with arbitrary names or a claim that the entire namespace was searched.
+A name's rank is within its own digit length. All-length views sort by score,
+then length, then label, so ties remain deterministic.
 
-`find` searches only retained names; filters cannot recover names excluded from
-the build. CSV shows the stored rank and reasons alongside observation fields.
-`--format text` produces one domain per line. Use `--help` on each command for
-filters, explicit number inputs, date ranges, and limits. If mise is not active
-in your shell, prefix `uv run` commands with `mise exec --`.
+Candidates come from direct pattern construction: repeats, symmetry, sequences,
+near repeats, zero endings, dates, constants, and compact-digit fallbacks when
+needed. The scorer evaluates the whole label regardless of its source. A bounded
+heap keeps the best observed names without storing rejected candidates. The
+build reports candidate work, retained counts, and cutoff scores per length.
 
-## What an availability result means
+```sh
+# A wider collection, or a stricter minimum score.
+uv run xyz.py build --keep-per-length 20000 --database wider.sqlite3
+uv run xyz.py build --length 7 --length 9 --min-score 50 --database focused.sqlite3
 
-A generated candidate is **unchecked**. A registrar can report it as available
-or unavailable at a particular time. Failed requests, throttling, and incomplete
-responses mean **unknown**. An unknown renewal price is not zero.
+# A deliberately smaller candidate-work budget for an exploratory build.
+uv run xyz.py build --max-generated 20000 --database quick.sqlite3
 
-DNS and registration are different systems. A registered domain can have no DNS
-delegation, so `NXDOMAIN` does not prove that it can be registered. RDAP supplies
-registration data; a missing record or status field is not a registrar's offer
-to sell a name. Registrar verification supplies the practical answer, subject to
-changes before checkout. See [ICANN's DNS rules](https://itp.cdn.icann.org/en/files/registry-agreements/net/net-agmt-html-01jul17-en.htm)
-and the [RDAP response specification](https://www.rfc-editor.org/rfc/rfc9083.html).
+# Export a filtered selection.
+uv run xyz.py find --length 8 --min-score 60 --format text > shortlist.txt
+```
 
-Saved checks need a source and timestamp. Their purpose is to avoid repeating
-recent work; they cannot guarantee future availability. Network checks must
-respect provider rate limits and `Retry-After`, retain completed work across
-interruptions, and keep errors distinct from genuine negative results.
+`--max-generated` is optional and applies per length; capped builds are marked in
+metadata and the viewer. A filtered/capped collection can contain fewer names.
+`--keep-per-length` replaces the old ambiguous `--keep` option. Use `--help` for
+pattern filters, explicit numbers, input files, date-generation ranges, and
+output formats. Explicit numbers get the same score rules; `--min-score 0` also
+permits supplied numbers with no recognized scoring property.
 
-## Python tooling
+## Storage and rebuilds
 
-The project targets **Python 3.14**, with **mise** selecting the interpreter and
-providing **uv**. uv owns project dependencies, the lockfile, and the `.venv`
-environment. Project commands run through `uv run` with the mise-selected Python.
-See [mise's Python and uv integration](https://mise.jdx.dev/lang/python.html#mise-uv)
-and [uv's project documentation](https://docs.astral.sh/uv/guides/projects/).
+`domains.sqlite3` stores only retained names, with score, rank-in-length, property
+explanations, and nullable registrar observations. Build metadata records the
+scoring version/profile, selection settings, and per-length counts and cutoffs.
+The database and exports stay local and are ignored by Git.
+
+A build does not overwrite a different selection without `--replace`. Replacement
+publishes a completed SQLite file atomically, preserving recorded observations
+for names that remain and dropping names outside the new selection. It also
+migrates the earlier unscored catalog. Use a separate database path to retain
+multiple collections. Interrupted builds leave the previous catalog intact.
+
+## Why numeric .xyz domains?
+
+The registry's **1.111B Class** covers all six-, seven-, eight-, and nine-digit
+numeric labels, from `000000.xyz` through `999999999.xyz`. Leading zeros are part
+of domain identity: `001234.xyz` differs from `1234.xyz`, which is outside this
+class. Labels remain strings throughout generation, storage, and exports.
+
+The class was introduced with advertised pricing of **US$0.99 per year**, making
+numeric names attractive for experiments, dates, identifiers, and campaigns.
+That historical price is context, not a quote: check the purchase registrar's
+actual registration and renewal prices, currency, and fees.
+
+See the [registry's numeric browser](https://gen.xyz/number),
+[pricing page](https://gen.xyz/pricing), and
+[2017 announcement](https://news.gandi.net/en/2017/06/introducing-the-1-111b-class-of-xyz-domains/).
+
+## Availability is a separate observation
+
+New names are **unchecked**. An explicit registrar response can establish
+**available** or **unavailable** at a recorded time; failed or inconclusive checks
+are **unknown**. Empty price fields mean unquoted, not zero. Recheck availability
+and renewal terms at checkout; discovery never reserves or purchases a name.
+
+DNS absence and missing RDAP records/status fields do not prove a name can be
+registered. Registrar verification provides the practical purchase answer.
+Namecheap is the intended verification provider; catalog construction and the
+viewer do not call it. See [Namecheap's check API](https://www.namecheap.com/support/api/methods/domains/check/)
+and the [RDAP specification](https://www.rfc-editor.org/rfc/rfc9083.html).
 
 ## Earlier scanner
 
 The [backup branch](https://github.com/jamesyc/xyzDomainFinder/tree/backup)
-preserves the original exhaustive six- and seven-digit scanner, its README,
+preserves the original exhaustive six-/seven-digit scanner, its README,
 `available_domains.csv`, and `resume_state.json`. It used CentralNic RDAP or
-DNS-over-HTTPS, with retries, throttling controls, and saved progress.
-
-Those results are historical observations from the old lookup rules. They are
-not a current availability list or a restriction on which names to consider.
-The new approach measures useful choices found for the effort spent checking
-them, rather than coverage of the entire numeric namespace.
+DNS-over-HTTPS with throttling, retries, and saved progress. Those results are
+historical observations, not a current availability list.
