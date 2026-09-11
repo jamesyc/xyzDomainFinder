@@ -26,6 +26,12 @@ choose **Start Namecheap check**. Recent observations are reused unless you
 request a recheck. The progress panel shows results, supports cancellation, and
 refreshes the catalog automatically. Completed results remain in SQLite.
 
+Browsing, filtering, selecting, and previewing do not change domain observations.
+Starting a check saves responses to the actual database as they arrive. These
+writes survive page/server restarts, and cancelling does not undo completed
+results. Later checks or deliberate catalog replacement can update them; they
+are persistent observations, not an immutable availability history.
+
 The viewer binds to localhost. It permits one selected check at a time, with up
 to 50 live names, 20 HTTP attempts, and 60 seconds. A preview is required and is
 valid for five minutes; it cannot be reused to start a duplicate check. Stopping
