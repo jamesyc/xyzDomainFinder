@@ -20,7 +20,16 @@ and nine-digit collections; search digits; filter by interesting property or
 minimum score; open a name to see every contributing rule. Export downloads all
 matching results, not just the current page. **Refresh data** rereads SQLite.
 
-The viewer binds to localhost and is read-only. It makes no registrar requests.
+Browsing makes no registrar requests. To check names, select up to 50 across
+pages, choose **Review selected check**, inspect the exact names and limits, then
+choose **Start Namecheap check**. Recent observations are reused unless you
+request a recheck. The progress panel shows results, supports cancellation, and
+refreshes the catalog automatically. Completed results remain in SQLite.
+
+The viewer binds to localhost. It permits one selected check at a time, with up
+to 50 live names, 20 HTTP attempts, and 60 seconds. A preview is required and is
+valid for five minutes; it cannot be reused to start a duplicate check. Stopping
+the server normally stops its active checker; saved observations remain available.
 Use `--database PATH` with `build`, `find`, or `serve` for another catalog, and
 `--port PORT` with `serve` for another port. If mise is not active in your shell,
 prefix `uv run` commands with `mise exec --`.
@@ -32,8 +41,8 @@ rule in each family contributes; independent family awards add together.
 
 | Family | Properties and points |
 | --- | --- |
-| Structure | Uniform digits 60; repeating blocks 45; palindromes 35; pairs 30; repeated-digit chunks or near repetition 20 |
-| Progression | Whole sequences 45; counting blocks 35; stepping pairs 30; dominant consecutive runs earn a length-scaled bonus |
+| Structure | Uniform digits 60; repeating blocks 45; palindromes 35; pairs or staircase runs 30; repeated-digit chunks or near repetition 20 |
+| Progression | Whole sequences 60; counting blocks 45; repeated/mirrored sequences or stepping pairs/runs 30; dominant consecutive runs earn a length-scaled bonus |
 | Simplicity | One distinct digit 20; two digits 14; three digits 6 |
 | Roundness | A sufficiently long zero ending 25 |
 | Meaning | Recognized mathematical constants 55; a valid date in the configured formats/ranges 12 |
@@ -42,6 +51,12 @@ For example, `888888.xyz` gets **80** points: uniform digits (60) and one distin
 digit (20). Its palindrome and paired-digit matches remain visible, but add no
 extra structure points. `121212.xyz` gets **71**: repetition (45), two digits (14),
 and the date 2012-12-12 (12).
+
+Composed patterns count too: `123123` repeats a sequence, `1234321` mirrors one,
+and `111222333` steps through digit-runs. Staircases such as `122333` combine
+ordered digits with ordered run lengths. Related progression matches still share
+one family award. The [quality comparison](QUALITY.md) records examples and the
+reasoning behind scoring v2.
 
 Dates use YYMMDD in 2000–2099 or YYYYMMDD in 1900–2099. No date meaning is inferred
 for seven or nine digits. Constants are pi, e, and the golden ratio, using the
@@ -64,7 +79,9 @@ A default build considers all four supported lengths and retains up to **10,000
 names per length**. That is a configurable browsing/checking budget, not a quota
 to fill with arbitrary names or a claim that the entire namespace was searched.
 A name's rank is within its own digit length. All-length views sort by score,
-then length, then label, so ties remain deterministic.
+then length, then within-length rank. Equal scores prefer fewer digit-runs,
+then fewer distinct digits, then lexical label order. These deterministic
+tie-breaks favor simpler structures without penalizing leading zeros outright.
 
 Candidates come from direct pattern construction: repeats, symmetry, sequences,
 near repeats, zero endings, dates, constants, and compact-digit fallbacks when
@@ -129,8 +146,9 @@ and renewal terms at checkout; discovery never reserves or purchases a name.
 
 DNS absence and missing RDAP records/status fields do not prove a name can be
 registered. Registrar verification provides the practical purchase answer.
-Namecheap verification is an explicit CLI action; catalog construction and the
-viewer do not call it. See [Namecheap's check API](https://www.namecheap.com/support/api/methods/domains/check/)
+Namecheap verification requires an explicit selected check in the website or
+CLI; catalog construction and ordinary browsing do not call it. See
+[Namecheap's check API](https://www.namecheap.com/support/api/methods/domains/check/)
 and the [RDAP specification](https://www.rfc-editor.org/rfc/rfc9083.html).
 
 ## Check a selected shortlist with Namecheap

@@ -34,8 +34,8 @@ CREATE TABLE domains (
  CHECK(domain=label||'.xyz')
 );
 CREATE UNIQUE INDEX domains_length_rank ON domains(length,rank);
-CREATE INDEX domains_length_score ON domains(length,score DESC,label);
-CREATE INDEX domains_score ON domains(score DESC,length,label);
+CREATE INDEX domains_length_score ON domains(length,score DESC,rank);
+CREATE INDEX domains_score ON domains(score DESC,length,rank);
 '''
 
 
@@ -43,7 +43,7 @@ def open_catalog(path, legacy=False):
     connection=sqlite3.connect(Path(path).resolve().as_uri()+'?mode=ro',uri=True)
     try:
         metadata=dict(connection.execute('SELECT key,value FROM metadata'))
-        allowed={RANKING_VERSION,'pattern-shortlist-v1'} if legacy else {RANKING_VERSION}
+        allowed={RANKING_VERSION,'numeric-interest-v1','pattern-shortlist-v1'} if legacy else {RANKING_VERSION}
         if metadata.get('ranking_version') not in allowed:
             raise ValueError('Catalog uses an older scoring version; run build --replace')
         if int(metadata.get('row_count',-1)) != connection.execute('SELECT COUNT(*) FROM domains').fetchone()[0]:
@@ -120,7 +120,7 @@ def check_selection(path, filters, limit, domains=None):
                 raise ValueError('Names are not in the catalog: ' + ', '.join(missing[:5]))
             clause += (' AND ' if clause else ' WHERE ') + 'domain IN (' + placeholders + ')'
             params.extend(domains)
-        query = 'SELECT ' + select_columns(connection) + ' FROM domains' + clause + ' ORDER BY score DESC,length,label'
+        query = 'SELECT ' + select_columns(connection) + ' FROM domains' + clause + ' ORDER BY score DESC,length,rank'
         if domains is None:
             query += ' LIMIT ?'
             params.append(limit)
@@ -214,7 +214,7 @@ def page(path,filters,limit=20,offset=0):
         connection.row_factory=sqlite3.Row
         total=connection.execute('SELECT COUNT(*) FROM domains'+clause,params).fetchone()[0]
         rows=[dict(row) for row in connection.execute('SELECT '+select_columns(connection)+' FROM domains'+clause+
-               ' ORDER BY score DESC,length,label LIMIT ? OFFSET ?',[*params,limit,offset])]
+               ' ORDER BY score DESC,length,rank LIMIT ? OFFSET ?',[*params,limit,offset])]
     return {'rows':rows,'total':total}
 
 
@@ -224,6 +224,7 @@ def detail(path,domain):
         row=connection.execute('SELECT '+select_columns(connection)+',properties_json FROM domains WHERE domain=?',(domain,)).fetchone()
     if row is None: return None
     result=dict(row);result['properties']=json.loads(result.pop('properties_json'))
+    result['tie_break']=scoring.complexity(domain[:-4])
     return result
 
 
@@ -243,5 +244,5 @@ def export_rows(path,filters):
     with closing(open_catalog(path)) as connection:
         connection.row_factory=sqlite3.Row
         for row in connection.execute('SELECT '+select_columns(connection)+',properties_json FROM domains'+clause+
-                                       ' ORDER BY score DESC,length,label',params):
+                                       ' ORDER BY score DESC,length,rank',params):
             yield dict(row)

@@ -2,7 +2,7 @@
 
 import heapq
 from datetime import date, timedelta
-from itertools import combinations, islice, product
+from itertools import chain, combinations, islice, product
 
 import scoring
 
@@ -32,11 +32,15 @@ def labels(pattern, length, start=None, end=None):
         for digit in "123456789":
             yield digit + "0" * (length - 1)
     elif pattern == "chunks":
-        for first in "0123456789":
-            for second in "0123456789":
-                if first != second:
-                    for split in range(2, length - 1):
-                        yield first * split + second * (length - split)
+        for count in (2, 3):
+            for cuts in combinations(range(2, length - 1), count - 1):
+                boundaries = (0, *cuts, length)
+                widths = [b - a for a, b in zip(boundaries, boundaries[1:])]
+                if min(widths) < 2:
+                    continue
+                for digits in product("0123456789", repeat=count):
+                    if all(a != b for a, b in zip(digits, digits[1:])):
+                        yield ''.join(digit * width for digit, width in zip(digits, widths))
     elif pattern == "date":
         for offset in range((end - start).days + 1):
             current = start + timedelta(days=offset)
@@ -91,9 +95,27 @@ def compact_digits(length, size):
                 yield ''.join(digits)
 
 
+def staircases(length):
+    for count in range(3, 5):
+        for first_width in range(1, length):
+            for direction in (1, -1):
+                widths = [first_width + direction*i for i in range(count)]
+                if min(widths) < 1 or sum(widths) != length:
+                    continue
+                for sequence in labels('sequence', count):
+                    yield ''.join(digit * width for digit, width in zip(sequence, widths))
+
+
+def sequence_patterns(pattern, length):
+    base = 'repeat' if pattern == 'motif_sequence' else 'palindrome'
+    for label in labels(base, length):
+        if pattern in scoring.score(label, True)['reasons'].split(';'):
+            yield label
+
+
 def sources(length, patterns=None, start=None, end=None):
     for pattern in patterns or ('repeat','palindrome','pair','chunks','sequence','round',
-                                'near_repeat','counting_blocks','consecutive_run','date','constant'):
+                                'near_repeat','counting_blocks','consecutive_run','staircase','date','constant'):
         if pattern == 'date':
             if length not in (6,8):
                 continue
@@ -116,6 +138,13 @@ def sources(length, patterns=None, start=None, end=None):
         elif pattern == 'stepping_pairs':
             if length % 2 == 0:
                 yield pattern, (''.join(c*2 for c in label) for label in labels('sequence',length//2))
+        elif pattern == 'staircase':
+            yield pattern, staircases(length)
+        elif pattern == 'stepping_runs':
+            yield pattern, (label for label in chain(labels('chunks', length), staircases(length), labels('pair', length))
+                            if 'stepping_runs' in scoring.score(label, True)['reasons'].split(';'))
+        elif pattern in ('motif_sequence', 'mirrored_sequence'):
+            yield pattern, sequence_patterns(pattern, length)
         else:
             yield pattern, labels(pattern,length)
 
@@ -146,19 +175,21 @@ def select(length, keep, *, patterns=None, explicit=(), prefix='', suffix='', co
             if points < min_score:
                 continue
             # Integer is only a tie-break key within one length, never an identity.
-            item = (points, -int(label), label)
+            detail = scoring.complexity(label)
+            item = (points, -detail['runs'], -detail['distinct_digits'], -int(label), label)
             if len(heap) < keep:
                 heapq.heappush(heap,item)
                 retained.add(label)
             elif item > heap[0]:
                 old = heapq.heapreplace(heap,item)
-                retained.remove(old[2])
+                retained.remove(old[-1])
                 retained.add(label)
         if max_generated is not None and examined >= max_generated:
             capped = True
             break
     rows = []
-    for rank, (_,_,label) in enumerate(sorted(heap,reverse=True),1):
+    for rank, item in enumerate(sorted(heap,reverse=True),1):
+        label = item[-1]
         row = scoring.score(label,explain=True)
         row['rank'] = rank
         rows.append(row)

@@ -1,4 +1,4 @@
-"""Read-only, paginated local web viewer for the scored SQLite catalog."""
+"""Local scored catalog with explicit, bounded checking of selected names."""
 
 import csv
 import io
@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import catalog
 import scoring
+import web_checks
 
 ASSETS=Path(__file__).with_name('web')
 ROUTES={'/':('index.html','text/html'),'/app.js':('app.js','text/javascript'),
@@ -51,11 +52,44 @@ def make_server(database,port=8765):
     database=Path(database).resolve()
 
     class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            host = self.headers.get('Host')
+            if (host not in {f'127.0.0.1:{self.server.server_port}', f'localhost:{self.server.server_port}'}
+                    or self.headers.get('Origin') != f'http://{host}'):
+                self.send_error(403); return
+            path = urlsplit(self.path).path
+            if path not in ('/api/check/preview', '/api/check/start', '/api/check/cancel'):
+                self.send_error(404); return
+            if self.headers.get('Content-Type', '').split(';')[0] != 'application/json':
+                self.send_error(415); return
+            try:
+                length = int(self.headers.get('Content-Length', '0'))
+                if not 1 <= length <= 16384:
+                    raise ValueError('Invalid request size')
+                self.connection.settimeout(5)
+                payload = json.loads(self.rfile.read(length))
+                if path == '/api/check/preview':
+                    result = self.server.checks.preview(payload)
+                else:
+                    if not isinstance(payload, dict) or set(payload) != {'id'} or not isinstance(payload['id'], str):
+                        raise ValueError('Expected the preview or check identifier')
+                    result = (self.server.checks.start(payload['id']) if path == '/api/check/start'
+                              else self.server.checks.cancel(payload['id']))
+                self.respond(200, 'application/json', json.dumps(result).encode())
+            except web_checks.Conflict as error:
+                self.respond(409, 'application/json', json.dumps({'error': str(error)}).encode())
+            except (ValueError, UnicodeError) as error:
+                self.respond(400, 'application/json', json.dumps({'error': str(error)}).encode())
+            except (OSError, sqlite3.Error):
+                self.respond(503, 'application/json', b'{"error":"The check could not be started. Check the local configuration."}')
+
         def do_GET(self):
             if self.headers.get('Host') not in {f'127.0.0.1:{self.server.server_port}',f'localhost:{self.server.server_port}'}:
                 self.send_error(403);return
             parsed=urlsplit(self.path)
             try:
+                if parsed.path == '/api/check/status':
+                    self.respond(200, 'application/json', json.dumps(self.server.checks.status()).encode()); return
                 if parsed.path in ROUTES:
                     filename,kind=ROUTES[parsed.path]
                     self.respond(200,kind,(ASSETS/filename).read_bytes());return
@@ -109,10 +143,15 @@ def make_server(database,port=8765):
 
         def log_message(self,*_): pass
 
-    return ThreadingHTTPServer(('127.0.0.1',port),Handler)
+    server = ThreadingHTTPServer(('127.0.0.1',port),Handler)
+    server.checks = web_checks.CheckManager(database)
+    return server
 
 
 def serve(database,port):
     with make_server(database,port) as server:
         print(f'Catalog viewer: http://127.0.0.1:{server.server_port}',flush=True)
-        server.serve_forever()
+        try:
+            server.serve_forever()
+        finally:
+            server.checks.close()

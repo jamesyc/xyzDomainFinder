@@ -45,7 +45,7 @@ Do not add a standalone entropy score on top of digit diversity: that would
 mostly reward the same observation twice. Avoid floating-point “98.2” scores
 whose precision implies more confidence than the rules justify.
 
-## Scoring v1: additive across independent families
+## Scoring v2: additive across independent families
 
 Use nonnegative integer points. For each family, award only its **strongest
 matching rule**; then sum the family awards. Record all matched properties,
@@ -55,7 +55,7 @@ including weaker matches that earned no additional points.
 score = structure + progression + simplicity + roundness + meaning
 ```
 
-The v1 weights below are explicit preferences. The constant bonus was increased
+The v2 weights below are explicit preferences. The constant bonus was increased
 from 35 to 55 after the first build excluded recognized constants at longer lengths. They are not a measure of availability, price, or resale value.
 Do not normalize every length's observed maximum to 100: that would make scores
 shift when the candidate pool changes.
@@ -69,19 +69,23 @@ shift when the candidate pool changes.
 | Palindrome | 35 | The entire label equals its reversal |
 | Paired digits | 30 | Even length; each aligned pair consists of the same digit |
 | Repeated-digit chunks | 20 | Exactly 2 or 3 maximal constant-digit runs cover the label; each run has length at least 2 |
+| Staircase | 30 | At least three maximal runs; both their digit values and lengths form non-wrapping +1 or -1 sequences |
 | Near repetition | 20 | Exactly one substitution from a uniform or exact repeating label whose base block is at most 3 digits; its block width must divide the full length |
 
 Minimal period prevents `121212` from being counted as both “alternating” and
 several different repeating block patterns. A uniform palindrome earns 60 in
 this family, not 60 + 35. Detect and display both properties nonetheless.
 
-### Progression: strongest match, up to 45 points
+### Progression: strongest match, up to 60 points
 
 | Rule | Points | Exact definition |
 | --- | ---: | --- |
-| Whole-label sequence | 45 | Every adjacent step is +1 or every step is -1; no 9-to-0 wraparound |
-| Counting blocks | 35 | Split into equal-width 2- or 3-digit blocks; at least 3 blocks; values progress by +1 or -1 without overflow |
+| Whole-label sequence | 60 | Every adjacent step is +1 or every step is -1; no 9-to-0 wraparound |
+| Counting blocks | 45 | Split into equal-width 2- or 3-digit blocks; at least 3 blocks; values progress by +1 or -1 without overflow |
 | Stepping pairs | 30 | Paired-digit label whose collapsed sequence has at least 3 digits and progresses by +1 or -1 |
+| Repeated sequence | 30 | The minimal repeating motif has at least three digits and is an ascending/descending sequence |
+| Mirrored sequence | 30 | A palindrome whose first half, including an odd center, is a sequence of at least three digits |
+| Stepping runs | 30 | Three or more consecutive digit-runs, each at least two digits long, or a staircase as defined above |
 | Dominant consecutive run | `floor(30 * run_length / length)` | Longest contiguous +1 or -1 run covers at least `ceil(2 * length / 3)` digits |
 
 For counting blocks, preserve zero-padded blocks in the label and evidence.
@@ -132,8 +136,8 @@ an explicit later profile option. Do not load personal data automatically.
 | `121212` | Repeated block 45 + two distinct digits 14 + date (2012-12-12) 12 | 71 |
 | `112233` | Paired digits 30 + stepping pairs 30 + three distinct digits 6 | 66 |
 | `100000` | Near repetition 20 + two distinct digits 14 + zero ending 25 | 59 |
-| `123456` | Whole-label sequence 45 | 45 |
-| `123321` | Palindrome 35 + three distinct digits 6 | 41 |
+| `123456` | Whole-label sequence 60 | 60 |
+| `123321` | Palindrome 35 + mirrored sequence 30 + three distinct digits 6 | 71 |
 
 These examples are regression cases and discussion material. For instance,
 whether `112233` should beat `123456` is a preference to calibrate, not a fact.
@@ -200,7 +204,7 @@ rule awards within a family by a fixed rule-ID ordering.
 sequences, counting blocks, near repeats, long zero endings, dates, and constants.
 It processes a length at a time and uses a bounded heap to retain the strongest
 observed candidates. A label always receives the same score regardless of which
-constructor emitted it. Heap ties use lexical label order within a length.
+constructor emitted it. Heap ties prefer fewer digit-runs, then fewer distinct digits, then lexical label order within a length.
 
 Uniform and one-/two-/three-digit-alphabet generators provide compact-digit
 fallbacks for sparse collections. A fallback is skipped when the retained cutoff
@@ -236,7 +240,7 @@ version. Add:
 - `rank`: now rank **within a digit length**, not across the whole database.
 
 Replace the global unique rank index with `UNIQUE(length, rank)`. Add an index
-on `(length, score DESC, label)` for ranked length views. A mixed-score index
+on `(length, score DESC, rank)` for ranked length views. A mixed-score index
 supports the default all-length website query without sorting the entire catalog.
 
 Build metadata includes schema/scoring versions, resolved profile, default
@@ -297,7 +301,7 @@ The broader catalog needs more than adding three options to the existing selecto
 - Add a score column; label rank as “Rank in length.” Do not imply a global rank
   when the all-length list contains four separate #1 entries.
 - Default all-length ordering: score descending, then length ascending, then
-  label ascending. Within a selected length use score descending, label ascending.
+  rank ascending. Within a selected length use the stored rank, including the v2 simplicity tie-breaks.
 - Add minimum-score filtering and property filters based on scored property IDs.
 - In candidate details show total score, each family award, all matched properties,
   and readable evidence. Explain zero-award overlaps as covered by a stronger
@@ -338,7 +342,7 @@ The explicit checking stage below operates on selected names and fixed budgets.
 Implemented `check` with the catalog's length, property, score, digit, and state
 filters, plus explicit names and plaintext/CSV input. `--preview` lists the
 selection without credentials, requests, or writes. Unknown names are rejected
-before any request. The website remains a read-only viewer of saved observations.
+before any request. The website can run the same checker after an exact selection preview; browsing remains read-only.
 
 Default bounds: 200 selected candidates, 50 distinct live names, 20 HTTP attempts,
 60 seconds, and a target of 10 eligible available results. Batches are at most
@@ -370,7 +374,7 @@ blocks redirects and never invokes registration/purchase endpoints.
 Local connection settings are loaded by mise from an ignored `mise.local.toml`
 with owner-only permissions and API-key redaction. That file is not committed.
 
-Validation: all 21 tests pass, covering budgets, cache reuse, partial responses,
+Namecheap validation covers budgets, cache reuse, partial responses,
 malformed results, Retry-After, interruption, redaction, price eligibility,
 preview behavior, and write coordination. A one-request live smoke check on
 `111111.xyz`, `31415926.xyz`, and `314159265.xyz` succeeded; all three were reported
@@ -405,3 +409,38 @@ explicit preferences, and add new positive rules with explicit construction and 
 
 Use the existing mise-selected Python 3.14, uv environment, and standard-library
 SQLite/tooling. The original scanner remains preserved on `backup`.
+
+## Quality improvements and completed website workflow
+
+Scoring v2 adds sequence motifs, mirrored sequences, stepping runs, and staircase
+run shapes. It increases whole-sequence and counting-block awards, completes
+three-run generation, and uses simpler run structures to break score ties.
+`QUALITY.md` records measured before/after scores and ranks. The rebuild retained
+40,000 names and preserved the three existing Namecheap observations.
+
+The website now supports selecting up to 50 names across pages and filters. A
+server-generated preview freezes the exact names, refresh policy, and limits for
+five minutes. Starting consumes that preview; duplicate/replayed starts are
+rejected. The child CLI checks only those names, with a 50-name maximum, 20
+requests, and 60 seconds. Its available-result target equals the selection size,
+so it processes the selection rather than silently stopping after ten successes.
+
+`web_checks.py` supervises one child process and retains only its latest status.
+CSV results drive progress; stderr is bounded and redacted. Cancellation sends
+SIGINT to that child, letting the existing checker save attempted/completed
+observations. Server shutdown also stops its owned child. SQLite remains the
+persistent source of results; no worker queue or job-history database is added.
+
+Mutating HTTP endpoints require the exact local Host and Origin, JSON bodies,
+validated catalog names, and bounded request sizes. Credentials stay server-side.
+The frontend restores in-progress status after refresh, automatically refreshes
+results, and exposes cancellation and recoverable errors. Ordinary page loads,
+filtering, and previews never initiate registrar requests.
+
+Validation covers composed-pattern scoring, false positives, constructor/scorer
+alignment, deterministic ties, preview expiry, catalog changes, duplicate starts,
+progress, redaction, cancellation, and cross-origin rejection. A real CLI child
+was tested using fresh cached observations with credentials disabled; it completed
+with zero network requests. No new live Namecheap query was needed for this work.
+
+The current full suite has 30 passing tests. The live catalog passes SQLite integrity and score-sum checks; all three existing observations remain unchanged.

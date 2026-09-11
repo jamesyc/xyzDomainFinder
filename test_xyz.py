@@ -41,7 +41,7 @@ def make_catalog(path):
 
 class ScoringTests(unittest.TestCase):
     def test_worked_examples(self):
-        for label,expected in {'888888':80,'121212':71,'112233':66,'100000':59,'123456':45,'123321':41,'123456789':45,'314159265':55}.items():
+        for label,expected in {'888888':80,'121212':71,'112233':66,'100000':59,'123456':60,'123321':71,'123456789':60,'314159265':55}.items():
             with self.subTest(label=label):
                 result=scoring.score(label,True)
                 self.assertEqual(result['score'],expected)
@@ -70,9 +70,42 @@ class ScoringTests(unittest.TestCase):
         names=['888888','123456','121212','123321','100000','000000']
         a,_=candidates.select(6,3,patterns=[],explicit=names*3)
         b,_=candidates.select(6,3,patterns=[],explicit=list(reversed(names))*2)
-        expected=sorted(names,key=lambda label:(-scoring.score(label),label))[:3]
+        expected=sorted(names,key=scoring.order_key)[:3]
         self.assertEqual([r['domain'][:-4] for r in a],expected)
         self.assertEqual(a,b)
+
+    def test_composed_patterns_are_rewarded_without_stacking_aliases(self):
+        cases = {'111222333': (56, 'stepping_runs'), '123123': (81, 'motif_sequence'),
+                 '1234321': (65, 'mirrored_sequence'), '123454321': (65, 'mirrored_sequence'),
+                 '123124125': (45, 'counting_blocks'), '122333': (66, 'staircase'),
+                 '112223333': (66, 'staircase')}
+        for label, (expected, property_id) in cases.items():
+            result = scoring.score(label, True)
+            self.assertEqual(result['score'], expected, label)
+            self.assertEqual(scoring.score(label), expected, label)
+            self.assertIn(property_id, result['reasons'].split(';'))
+            self.assertEqual(sum(p['awarded'] for p in result['properties']), expected)
+        result = scoring.score('112233', True)
+        self.assertEqual(sum(p['awarded'] for p in result['properties'] if p['family'] == 'progression'), 30)
+        for label, rule in [('121212','motif_sequence'), ('1294921','mirrored_sequence'),
+                            ('111333555','stepping_runs'), ('122334','staircase')]:
+            self.assertNotIn(rule, scoring.score(label, True)['reasons'].split(';'))
+
+    def test_chunk_coverage_and_composed_pattern_sources(self):
+        chunks = list(candidates.labels('chunks', 9))
+        self.assertIn('111222333', chunks)
+        self.assertEqual(len(chunks), len(set(chunks)))
+        self.assertTrue(all('chunks' in scoring.score(label, True)['reasons'].split(';') for label in chunks))
+        self.assertIn('122333', list(candidates.staircases(6)))
+        found, _ = candidates.select(6, 100, patterns=['motif_sequence','mirrored_sequence'])
+        properties = {p['id'] for row in found for p in row['properties']}
+        self.assertTrue({'motif_sequence','mirrored_sequence'} <= properties)
+
+    def test_equal_scores_prefer_simpler_runs(self):
+        labels = ['100101001', '110000011']
+        self.assertEqual(scoring.score(labels[0]), scoring.score(labels[1]))
+        selected, _ = candidates.select(9, 2, patterns=[], explicit=labels)
+        self.assertEqual(selected[0]['domain'], '110000011.xyz')
 
     def test_filters_caps_and_leading_zero_identity(self):
         selected,stats=candidates.select(6,20,patterns=['repeat'],prefix='12',suffix='12',contains='21')
@@ -182,7 +215,7 @@ class ViewerTests(unittest.TestCase):
                     connection.request('GET',endpoint);response=connection.getresponse()
                     self.assertEqual(response.status,404);response.read()
                 connection.request('POST','/api/catalog',body='{}');response=connection.getresponse()
-                self.assertEqual(response.status,501);response.read()
+                self.assertEqual(response.status,403);response.read()
                 connection.request('GET','/api/catalog',headers={'Host':'untrusted.example'});response=connection.getresponse()
                 self.assertEqual(response.status,403);response.read()
             finally:

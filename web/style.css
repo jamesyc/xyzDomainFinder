@@ -218,3 +218,13 @@ dialog{width:min(540px,calc(100vw - 32px));max-height:90vh;overflow-y:auto}
 .sidebar-note{padding-top:25px}.brand{margin-bottom:30px}.patterns-label{margin-top:25px}.pattern-button{padding-top:9px;padding-bottom:9px}
 .page-heading h1{font-size:1.8rem;max-width:650px}
 @media(max-width:800px){.cohorts{gap:6px}.cohort-button{padding:9px 10px;font-size:.8rem;gap:7px}.page-heading h1{font-size:1.55rem}.brand{margin-bottom:0}.pattern-button{white-space:nowrap}.cohort-info{font-size:.75rem}}
+.selection-bar{display:flex;align-items:center;gap:16px;padding:0 25px 20px;font-size:.875rem;color:#72798e}
+.selection-bar>span{margin-right:auto}.check-column{width:42px;padding-left:18px!important;padding-right:6px!important}
+input[type=checkbox]{width:17px;height:17px;accent-color:var(--purple);cursor:pointer}.check-column input{display:block}
+.check-progress{display:flex;gap:15px;align-items:flex-start;flex-wrap:wrap;background:#f0edf9;border:1px solid #dcd4f2;border-radius:10px;padding:20px;margin-bottom:25px;font-size:.875rem}
+.check-progress>div{flex:1;min-width:220px}.check-progress p{line-height:1.6;color:#6e7086}.check-progress progress{width:100%;height:8px;accent-color:var(--purple)}
+.check-progress details{flex-basis:100%;font-size:.8rem;color:#71768a}.check-progress pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.75rem;max-height:180px;overflow:auto}
+#check-preview-note{font-size:.9rem;line-height:1.7;color:#747b90}#check-preview-list{max-height:260px;overflow:auto;border:1px solid #eceef4;border-radius:8px;margin:18px 0}
+.preview-row{display:flex;justify-content:space-between;gap:12px;padding:11px 13px;border-bottom:1px solid #eceef4;font-size:.85rem}.preview-row:last-child{border-bottom:0}.preview-row code{font-size:.9rem}.preview-row span{color:#868b9e}
+.force-refresh{display:flex;align-items:center;gap:10px;margin:20px 0;font-size:.875rem;line-height:1.5}#check-preview-error{font-size:.875rem;color:#a24e64}
+@media(max-width:800px){.selection-bar{padding:0 16px 16px;gap:10px;flex-wrap:wrap}.selection-bar>span{flex-basis:100%}.selection-bar .primary-button{margin-left:auto}}

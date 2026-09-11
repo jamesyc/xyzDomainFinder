@@ -128,7 +128,7 @@ def build_parser():
     check.add_argument('--max-registration',type=price_limit,help='one-year base-price ceiling, excluding fees/taxes')
     check.add_argument('--max-renewal',type=price_limit,help='one-year base-price ceiling, excluding fees/taxes')
     check.add_argument('--currency',help='three-letter currency required when using price ceilings')
-    serve=commands.add_parser('serve',allow_abbrev=False,help='Open the read-only local website')
+    serve=commands.add_parser('serve',allow_abbrev=False,help='Open the local catalog and selected-name checking workflow')
     serve.add_argument('--database',type=Path,default=Path('domains.sqlite3'))
     serve.add_argument('--port',type=positive_int,default=8765)
     return parser
@@ -170,7 +170,7 @@ def collect(args):
         stats[str(length)]=info;rows.extend(selected)
         print(f'{length} digits: {info["examined"]:,} candidates considered; {len(selected):,} retained; '
               f'cutoff {info["cutoff"]}; {info["elapsed_seconds"]:.2f}s'+(' (candidate cap reached)' if info['capped'] else ''),file=sys.stderr,flush=True)
-    rows.sort(key=lambda row:(-row['score'],row['length'],row['domain']))
+    rows.sort(key=lambda row:(-row['score'],row['length'],row['rank']))
     selection={'lengths':lengths,'patterns':patterns,'keep_per_length':keep,'min_score':args.min_score,
         'max_generated':args.max_generated,'prefix':args.prefix,'suffix':args.suffix,'contains':args.contains,
         'no_leading_zero':args.no_leading_zero,'date_start':str(args.date_start),'date_end':str(args.date_end),

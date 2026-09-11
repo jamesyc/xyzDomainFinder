@@ -18,7 +18,7 @@
     <div class="section-label patterns-label">PROPERTIES <span>FILTER BY</span></div>
     <nav id="patterns" aria-label="Pattern filters"></nav>
     <div class="sidebar-note"><strong>Pattern counts overlap.</strong><p>One name can match several patterns.</p></div>
-    <div class="sidebar-footer"><span class="local-indicator" aria-hidden="true"></span> Local catalog <span class="read-only">Read only</span></div>
+    <div class="sidebar-footer"><span class="local-indicator" aria-hidden="true"></span> Local catalog <span class="read-only">Selected checks</span></div>
   </aside>
   <main id="main">
     <header class="topbar"><div><span class="breadcrumb">Workspace</span><span class="slash">/</span> Catalog</div><button id="refresh" class="quiet-button"><span aria-hidden="true">↻</span> Refresh data</button></header>
@@ -31,6 +31,7 @@
       </section>
       <div id="error" role="alert" hidden></div>
       <div id="cap-warning" class="notice" hidden>The generation cap was reached. This shortlist comes from a partially examined pool.</div>
+      <section id="check-progress" class="check-progress" aria-live="polite" hidden><div><strong id="check-status"></strong><p id="check-summary"></p><progress id="check-meter" value="0" max="1"></progress></div><button id="cancel-check" class="secondary-button">Cancel check</button><details><summary>Check details</summary><pre id="check-log"></pre></details></section>
       <nav id="cohorts" class="cohorts" aria-label="Digit lengths"></nav>
       <p id="cohort-info" class="cohort-info"></p>
       <section class="catalog-panel" aria-label="Domain catalog">
@@ -40,7 +41,8 @@
           <label class="select-field"><span>Min. score</span><input id="min-score" type="number" min="0" step="1" value="0" aria-label="Minimum score"></label>
           <label class="select-field"><span>Status</span><select id="state"><option value="">All statuses</option><option value="unchecked">Unchecked</option><option value="available">Available</option><option value="unavailable">Unavailable</option><option value="unknown">Unknown</option></select></label>
         </form>
-        <div class="table-scroll"><table><thead><tr><th scope="col" class="rank-column">Length rank</th><th scope="col">Domain</th><th scope="col">Score</th><th scope="col">Why it ranks</th><th scope="col">Length</th><th scope="col">Availability</th><th scope="col"><span class="visually-hidden">Copy domain</span></th></tr></thead><tbody id="rows"></tbody></table></div>
+        <div class="selection-bar"><span id="selection-count">No names selected</span><button id="clear-selection" class="quiet-button" disabled>Clear selection</button><button id="review-check" class="primary-button" disabled>Review selected check</button></div>
+        <div class="table-scroll"><table><thead><tr><th scope="col" class="check-column"><input id="select-page" type="checkbox" aria-label="Select names on this page"></th><th scope="col" class="rank-column">Length rank</th><th scope="col">Domain</th><th scope="col">Score</th><th scope="col">Why it ranks</th><th scope="col">Length</th><th scope="col">Availability</th><th scope="col"><span class="visually-hidden">Copy domain</span></th></tr></thead><tbody id="rows"></tbody></table></div>
         <div id="empty" class="empty" hidden><div aria-hidden="true">∅</div><h3>No matching names</h3><p>Try different digits or clear your filters.</p><button id="reset" class="secondary-button">Clear filters</button></div>
         <div class="pagination"><span id="range">—</span><div><button id="previous" class="page-button" aria-label="Previous page">←</button><span id="page">—</span><button id="next" class="page-button" aria-label="Next page">→</button></div></div>
       </section>
@@ -48,6 +50,7 @@
     </div>
   </main>
   <dialog id="details" aria-labelledby="detail-name"><button id="close-details" class="close-button" aria-label="Close details">×</button><div class="eyebrow">CANDIDATE DETAILS</div><h2 id="detail-name"></h2><div id="detail-content"></div><button id="copy-detail" class="primary-button">Copy domain</button></dialog>
+  <dialog id="check-dialog" aria-labelledby="check-title"><button id="close-check-dialog" class="close-button" aria-label="Close check preview">×</button><div class="eyebrow">NAMECHEAP AVAILABILITY</div><h2 id="check-title">Review selected names</h2><p id="check-preview-note"></p><div id="check-preview-list"></div><label class="force-refresh"><input id="force-refresh" type="checkbox"> Recheck even if recent results are saved</label><p id="check-preview-error" role="alert" hidden></p><button id="start-check" class="primary-button" disabled>Start Namecheap check</button></dialog>
   <div id="toast" role="status" class="toast" hidden></div>
 </body>
 </html>

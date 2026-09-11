@@ -4,7 +4,7 @@ from collections import Counter
 from datetime import date
 from itertools import groupby
 
-VERSION = 'numeric-interest-v1'
+VERSION = 'numeric-interest-v2'
 CONSTANTS = {'pi': '314159265', 'e': '271828182', 'golden ratio': '161803398'}
 RULES = {
     'uniform': ('structure', 60, 'Uniform digits'),
@@ -13,9 +13,13 @@ RULES = {
     'pair': ('structure', 30, 'Paired digits'),
     'chunks': ('structure', 20, 'Repeated-digit chunks'),
     'near_repeat': ('structure', 20, 'Near repetition'),
-    'sequence': ('progression', 45, 'Whole sequence'),
-    'counting_blocks': ('progression', 35, 'Counting blocks'),
+    'staircase': ('structure', 30, 'Staircase runs'),
+    'sequence': ('progression', 60, 'Whole sequence'),
+    'counting_blocks': ('progression', 45, 'Counting blocks'),
     'stepping_pairs': ('progression', 30, 'Stepping pairs'),
+    'stepping_runs': ('progression', 30, 'Stepping digit-runs'),
+    'motif_sequence': ('progression', 30, 'Repeated sequence'),
+    'mirrored_sequence': ('progression', 30, 'Mirrored sequence'),
     'consecutive_run': ('progression', 0, 'Consecutive run'),
     'digit_diversity': ('simplicity', 0, 'Few distinct digits'),
     'round': ('roundness', 25, 'Long zero ending'),
@@ -24,12 +28,23 @@ RULES = {
 }
 PROFILE = {'version': VERSION, 'rules': RULES, 'diversity_points': {1: 20, 2: 14, 3: 6},
            'run_points': 'floor(30 * run_length / length), coverage >= ceil(2*length/3)',
-           'constants': CONSTANTS, 'dates': {'YYMMDD': '2000–2099', 'YYYYMMDD': '1900–2099'}}
+           'constants': CONSTANTS, 'dates': {'YYMMDD': '2000–2099', 'YYYYMMDD': '1900–2099'},
+           'tie_break': 'fewer digit-runs, then fewer distinct digits, then lexical label order'}
 
 
 def is_sequence(values):
     return len(values) >= 3 and (all(b-a == 1 for a,b in zip(values, values[1:]))
                                  or all(b-a == -1 for a,b in zip(values, values[1:])))
+
+
+def complexity(label):
+    return {'runs': 1 + sum(a != b for a, b in zip(label, label[1:])),
+            'distinct_digits': len(set(label))}
+
+
+def order_key(label):
+    detail = complexity(label)
+    return (-score(label), detail['runs'], detail['distinct_digits'], label)
 
 
 def score(label, explain=False):
@@ -54,18 +69,30 @@ def score(label, explain=False):
         for width in range(2, n//2 + 1):
             if n % width == 0 and label[:width] * (n//width) == label:
                 add('repeat', f'{label[:width]} × {n//width}')
+                if is_sequence([int(c) for c in label[:width]]):
+                    add('motif_sequence', f'{label[:width]} is a sequence repeated {n//width} times')
                 break
     if label == label[::-1]:
         add('palindrome', f'{label} reads the same in reverse')
+        half = label[:(n+1)//2]
+        if is_sequence([int(c) for c in half]):
+            add('mirrored_sequence', f'{half} forms the sequence on the first side of the mirror')
     paired = n % 2 == 0 and all(label[i] == label[i+1] for i in range(0,n,2))
     if paired:
         add('pair', ' / '.join(label[i:i+2] for i in range(0,n,2)))
         if is_sequence([int(c) for c in label[::2]]):
             add('stepping_pairs', ' → '.join(label[::2]))
-    if distinct <= 3 and (explain or awards.get('structure', 0) < 20):
+    if distinct <= n//2 or distinct == 3:
         runs = [c * len(list(g)) for c,g in groupby(label)]
+        widths = [len(run) for run in runs]
+        steps = is_sequence([int(run[0]) for run in runs])
+        staircase = steps and is_sequence(widths)
         if 2 <= len(runs) <= 3 and all(len(run) >= 2 for run in runs):
             add('chunks', ' / '.join(runs))
+        if staircase:
+            add('staircase', ' / '.join(runs) + ' (run sizes ' + ', '.join(map(str, widths)) + ')')
+        if steps and (min(widths) >= 2 or staircase):
+            add('stepping_runs', ' → '.join(runs))
     if explain or awards.get('structure', 0) < 20:
         for width in range(1,4):
             if n % width:
