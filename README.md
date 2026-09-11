@@ -4,8 +4,8 @@ Find interesting numeric `.xyz` domains that you could actually register.
 
 The useful result is a short list of memorable, meaningful, affordable names.
 xyzDomainFinder starts with your preferences, generates matching numbers locally,
-and ranks them before any availability checks. Network work is reserved for names
-you might want to buy.
+and saves only the best-ranked candidates in SQLite. Browse that catalog and
+export a shortlist before checking names at your registrar.
 
 ## Why numeric .xyz domains?
 
@@ -36,8 +36,10 @@ and producing a useful shortlist repeatedly.
    a manageable candidate pool. The shortlist mixes selected pattern families,
    and each result includes the reason it matches. Ranking expresses your
    preferences; it is not an appraisal of resale value.
-3. **Review a small list.** Export names for a registrar's bulk search. Candidate
-   generation needs no account, API credentials, or network access.
+3. **Keep and review the best candidates.** A build retains up to 1,000 names by
+   default, with their ranks and match reasons in a local SQLite database.
+   Search that catalog or export names for a registrar's bulk search. Building
+   and browsing need no account, API credentials, or network access.
 4. **Verify the names you like.** Check registration availability and prices
    through the registrar where you intend to purchase. Automated checks should
    have explicit limits on names, requests, and elapsed time.
@@ -46,6 +48,45 @@ and producing a useful shortlist repeatedly.
 
 For example, `123123.xyz` repeats a block, `123321.xyz` is a palindrome, and
 `20260911.xyz` encodes a date. These illustrate patterns, not availability.
+
+## Build and browse
+
+```sh
+mise install
+mise exec -- uv sync
+uv run xyz.py build
+uv run xyz.py find --limit 20
+uv run xyz.py find --pattern palindrome --contains 88
+uv run xyz.py find --prefix 12 --format text > shortlist.txt
+```
+
+The default build selects six-digit names and stores at most 1,000 in
+`domains.sqlite3`. Use repeated `--length` and `--pattern` options to choose
+six- through nine-digit names and pattern families. `--keep` sets the number
+retained; `--max-generated` bounds local construction work (250,000 constructions
+by default). A cap warning means the pool may be incomplete; this is also recorded
+in catalog metadata. Generated data stays local and is ignored by Git.
+
+```sh
+uv run xyz.py build --length 8 --length 6 --pattern repeat --pattern palindrome --keep 500 --replace
+uv run xyz.py generate --length 9 --pattern palindrome --limit 20 --format csv
+```
+
+`--replace` intentionally replaces the catalog's candidate selection, preserving
+recorded observations for names that remain. Use `--database PATH` to maintain a
+separate catalog instead. Repeating the same build settings reuses the existing
+catalog. The `generate` command prints candidates without changing SQLite.
+
+Ranking gives explicit numbers first priority, then takes turns across pattern
+families. Within each family it favors requested length order, fewer distinct
+digits, and lexical order. The top-K cutoff is a preference, not a resale-value
+estimate. Arbitrary unrecognized numbers do not fill unused capacity.
+
+`find` searches only retained names; filters cannot recover names excluded from
+the build. CSV shows the stored rank and reasons alongside observation fields.
+`--format text` produces one domain per line. Use `--help` on each command for
+filters, explicit number inputs, date ranges, and limits. If mise is not active
+in your shell, prefix `uv run` commands with `mise exec --`.
 
 ## What an availability result means
 
